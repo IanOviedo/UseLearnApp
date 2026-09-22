@@ -69,6 +69,13 @@ export const obtenerTodasLasSesiones = () => {
     .all();
 };
 
+export const actualizarTopicSiVacio = (sessionId: number, topic: string) => {
+  const stmt = db.prepare(
+    `UPDATE chat_sessions SET topic = ? WHERE id = ? AND (topic IS NULL OR topic = '')`
+  );
+  return stmt.run(topic, sessionId);
+};
+
 // ----------- New chat-related queries -----------
 export const crearChatSession = (titulo: string, modeloChat: string, modeloRevisor: string) => {
   const stmt = db.prepare(

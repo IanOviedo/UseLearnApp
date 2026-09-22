@@ -21,6 +21,7 @@ export default function ChatPage() {
   const lastPreguntaMessage = mensajes.filter((m: any) => m.tipo === 'pregunta').pop();
   const preguntaObj = lastPreguntaMessage ? JSON.parse(lastPreguntaMessage.contenido) : null;
   const [selectedOption, setSelectedOption] = useState<string>("");
+const lastCorrMessage = mensajes.find((m: any) => m.tipo === 'correccion' && lastPreguntaMessage && m.id > lastPreguntaMessage.id);
   const [libreRespuesta, setLibreRespuesta] = useState<string>("");
 
   useEffect(() => {
@@ -112,7 +113,7 @@ export default function ChatPage() {
               )}
             </div>
 
-            {lastPreguntaMessage && (
+            {lastPreguntaMessage && !lastCorrMessage && (
               <div className="mt-4">
                 <div className="mb-2">
                   <div className="font-semibold mb-1">{preguntaObj?.pregunta}</div>
@@ -155,7 +156,7 @@ export default function ChatPage() {
               </div>
             )}
 
-            {!lastPreguntaMessage && (
+            {(!lastPreguntaMessage || lastCorrMessage) && (
               <div className="flex items-center gap-2">
                 <textarea
                   className="flex-1 border rounded p-2"

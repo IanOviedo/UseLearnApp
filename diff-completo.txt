@@ -1,0 +1,142 @@
+﻿diff --git a/app/api/chat/generar-pregunta/route.ts b/app/api/chat/generar-pregunta/route.ts
+index f3a090d..ed47603 100644
+--- a/app/api/chat/generar-pregunta/route.ts
++++ b/app/api/chat/generar-pregunta/route.ts
+@@ -1,6 +1,6 @@
+ // app/api/chat/generar-pregunta/route.ts
+ import type { NextRequest } from 'next/server';
+-import { guardarMensajeTipado } from '@/lib/db/queries';
++import { guardarMensajeTipado, actualizarTopicSiVacio } from '@/lib/db/queries';
+ import { fetchOllama } from '@/lib/ollama';
+ 
+ export const runtime = 'nodejs';
+@@ -19,36 +19,52 @@ export async function POST(request: NextRequest) {
+   const { sessionId, contenido, modelo } = await request.json();
+ 
+   // Construct prompt for the model
+-  const prompt = `Genera una pregunta de comprensi├│n sobre el siguiente contenido:\n\n${contenido}\n\nDecide si la respuesta debe ser de opci├│n m├║ltiple o de texto libre y responde *├║nicamente* con JSON en el siguiente formato:\n\nSi es m├║ltiple elecci├│n: {"formato": "multiple_choice", "pregunta": "...", "opciones": ["...", "...", "...", "..."], "respuesta_correcta": "..."}\n\nSi es texto libre: {"formato": "libre", "pregunta": "..."}`;
++  const prompt = `Gener├í exactamente 8 preguntas distintas entre s├¡ (ni la redacci├│n ni el concepto evaluado se debe repetir) sobre el contenido siguiente:\n\n${contenido}\n\nDecide si la respuesta debe ser de opci├│n m├║ltiple o de texto libre y responde *├║nicamente* con un array JSON de 8 objetos, sin texto adicional antes ni despu├⌐s.\n\nCada objeto debe tener la forma:\n- Si es opci├│n m├║ltiple: {"formato": "multiple_choice", "pregunta": "...", "opciones": ["...", "...", "...", "..."], "respuesta_correcta": "..."}\n- Si es texto libre: {"formato": "libre", "pregunta": "..."}`;
+ 
+   try {
+-    const respuesta = await fetchOllama(modelo, prompt);
+-    let preguntaObj: any;
+-    try {
+-      preguntaObj = JSON.parse(respuesta);
+-    } catch {
+-      // If parsing fails, return error response
+-      return new Response(
+-        JSON.stringify({ error: "No se pudo generar la pregunta, intent├í de nuevo" }),
+-        {
+-          status: 200,
+-          headers: { 'Content-Type': 'application/json' },
+-        }
+-      );
+-    }
++  const respuesta = await fetchOllama(modelo, prompt);
++  let preguntasArray: any;
++  try {
++    preguntasArray = JSON.parse(respuesta);
++  } catch {
++    return new Response(
++      JSON.stringify({ error: "No se pudo generar la pregunta, intent├í de nuevo" }),
++      {
++        status: 200,
++        headers: { 'Content-Type': 'application/json' },
++      }
++    );
++  }
+ 
+-    // Store the assistant message with tipo 'pregunta'
+-    await guardarMensajeTipado(sessionId, 'assistant', JSON.stringify(preguntaObj), 'pregunta');
++  if (!Array.isArray(preguntasArray) || preguntasArray.length !== 8) {
++    return new Response(
++      JSON.stringify({ error: "No se pudo generar la pregunta, intent├í de nuevo" }),
++      {
++        status: 200,
++        headers: { 'Content-Type': 'application/json' },
++      }
++    );
++  }
+ 
+-    return new Response(JSON.stringify({ pregunta: preguntaObj }), {
+-      status: 200,
+-      headers: { 'Content-Type': 'application/json' },
+-    });
+-  } catch (err) {
+-    // If fetchOllama throws, return generic error
+-    return new Response(JSON.stringify({ error: "No se pudo generar la pregunta, intent├í de nuevo" }), {
++  // Update topic if not set
++  await actualizarTopicSiVacio(sessionId, contenido);
++
++  // Store each question
++  for (const pregunta of preguntasArray) {
++    await guardarMensajeTipado(sessionId, 'assistant', JSON.stringify(pregunta), 'pregunta');
++  }
++
++  return new Response(JSON.stringify({ preguntas: preguntasArray }), {
++    status: 200,
++    headers: { 'Content-Type': 'application/json' },
++  });
++} catch (err) {
++  return new Response(
++    JSON.stringify({ error: "No se pudo generar la pregunta, intent├í de nuevo" }),
++    {
+       status: 200,
+       headers: { 'Content-Type': 'application/json' },
+-    });
+-  }
++    }
++  );
++}
+ }
+diff --git a/app/chat/page.tsx b/app/chat/page.tsx
+index c41bf52..982f42e 100644
+--- a/app/chat/page.tsx
++++ b/app/chat/page.tsx
+@@ -21,6 +21,7 @@ export default function ChatPage() {
+   const lastPreguntaMessage = mensajes.filter((m: any) => m.tipo === 'pregunta').pop();
+   const preguntaObj = lastPreguntaMessage ? JSON.parse(lastPreguntaMessage.contenido) : null;
+   const [selectedOption, setSelectedOption] = useState<string>("");
++const lastCorrMessage = mensajes.find((m: any) => m.tipo === 'correccion' && lastPreguntaMessage && m.id > lastPreguntaMessage.id);
+   const [libreRespuesta, setLibreRespuesta] = useState<string>("");
+ 
+   useEffect(() => {
+@@ -112,7 +113,7 @@ export default function ChatPage() {
+               )}
+             </div>
+ 
+-            {lastPreguntaMessage && (
++            {lastPreguntaMessage && !lastCorrMessage && (
+               <div className="mt-4">
+                 <div className="mb-2">
+                   <div className="font-semibold mb-1">{preguntaObj?.pregunta}</div>
+@@ -155,7 +156,7 @@ export default function ChatPage() {
+               </div>
+             )}
+ 
+-            {!lastPreguntaMessage && (
++            {(!lastPreguntaMessage || lastCorrMessage) && (
+               <div className="flex items-center gap-2">
+                 <textarea
+                   className="flex-1 border rounded p-2"
+diff --git a/lib/db/queries.ts b/lib/db/queries.ts
+index 4346c7d..c4e8826 100644
+--- a/lib/db/queries.ts
++++ b/lib/db/queries.ts
+@@ -69,6 +69,13 @@ export const obtenerTodasLasSesiones = () => {
+     .all();
+ };
+ 
++export const actualizarTopicSiVacio = (sessionId: number, topic: string) => {
++  const stmt = db.prepare(
++    `UPDATE chat_sessions SET topic = ? WHERE id = ? AND (topic IS NULL OR topic = '')`
++  );
++  return stmt.run(topic, sessionId);
++};
++
+ // ----------- New chat-related queries -----------
+ export const crearChatSession = (titulo: string, modeloChat: string, modeloRevisor: string) => {
+   const stmt = db.prepare(
+diff --git a/uselearn.db b/uselearn.db
+index 5a6f768..da0251b 100644
+Binary files a/uselearn.db and b/uselearn.db differ
