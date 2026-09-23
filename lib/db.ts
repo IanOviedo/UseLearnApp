@@ -44,5 +44,13 @@ db.exec(`CREATE TABLE IF NOT EXISTS respuestas (
   corregido_en TEXT
 )`);
 
+// Function to create a new session
+function crearSesion(topic: string, textoOriginal: string): number {
+  const result = db.prepare("INSERT INTO sesiones (topic, texto_original) VALUES (?, ?)")
+    .run(topic, textoOriginal);
+  return Number(result.lastInsertRowid);
+}
+
 // 3. Export the database connection as the default export, nothing else.
 export default db;
+export { crearSesion };
