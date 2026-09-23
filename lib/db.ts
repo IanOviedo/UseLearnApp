@@ -111,5 +111,14 @@ function elegirSiguienteSubtema(sesionId: number): { id: number, nombre: string,
   return siguientes[0];
 }
 
+function sondeoCompleto(sesionId: number): boolean {
+  const subtemas = obtenerSubtemas(sesionId);
+  if (subtemas.length === 0) {
+    return false;
+  }
+  return subtemas.every(subtema => subtema.cubierto);
+}
+
 export default db;
-export { crearSesion, agregarSubtema, obtenerSubtemas, actualizarAciertos, obtenerSesion, elegirSiguienteSubtema };
+export { crearSesion, agregarSubtema, obtenerSubtemas, actualizarAciertos, obtenerSesion, elegirSiguienteSubtema, sondeoCompleto }; 
+
