@@ -51,6 +51,13 @@ function crearSesion(topic: string, textoOriginal: string): number {
   return Number(result.lastInsertRowid);
 }
 
+// Function to add a new subtema
+function agregarSubtema(sesionId: number, nombre: string): number {
+  const result = db.prepare("INSERT INTO subtemas (sesion_id, nombre) VALUES (?, ?)")
+    .run(sesionId, nombre);
+  return Number(result.lastInsertRowid);
+}
+
 // 3. Export the database connection as the default export, nothing else.
 export default db;
-export { crearSesion };
+export { crearSesion, agregarSubtema };
