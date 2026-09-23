@@ -58,6 +58,41 @@ function agregarSubtema(sesionId: number, nombre: string): number {
   return Number(result.lastInsertRowid);
 }
 
+// Function to update subtema scores
+function actualizarAciertos(subtemaId: number, correcta: boolean): void {
+  const statement = db.prepare("SELECT aciertos_seguidos, cubierto FROM subtemas WHERE id = ?");
+  const row = statement.get(subtemaId) as { aciertos_seguidos: number, cubierto: number } | undefined;
+
+  if (!row) {
+    return; // Subtema not found
+  }
+
+  if (correcta) {
+    const newAciertos = row.aciertos_seguidos + 1;
+    const newCubierto = newAciertos >= 2 ? 1 : row.cubierto;
+
+    db.prepare("UPDATE subtemas SET aciertos_seguidos = ?, cubierto = ? WHERE id = ?")
+        .run(newAciertos, newCubierto, subtemaId);
+  } else {
+    // Reset score if incorrect
+    db.prepare("UPDATE subtemas SET aciertos_seguidos = 0 WHERE id = ?")
+        .run(subtemaId);
+  }
+}
+
+// Function to get subtemas for a session
+function obtenerSubtemas(sesionId: number): { id: number, nombre: string, aciertosSeguidos: number, cubierto: boolean }[] {
+  const results = db.prepare("SELECT id, nombre, aciertos_seguidos, cubierto FROM subtemas WHERE sesion_id = ?")
+    .all(sesionId) as { id: number, nombre: string, aciertos_seguidos: number, cubierto: number }[];
+
+  return results.map(row => ({
+    id: row.id,
+    nombre: row.nombre,
+    aciertosSeguidos: row.aciertos_seguidos,
+    cubierto: row.cubierto === 1
+  }));
+}
+
 // 3. Export the database connection as the default export, nothing else.
 export default db;
-export { crearSesion, agregarSubtema };
+export { crearSesion, agregarSubtema, obtenerSubtemas, actualizarAciertos };
