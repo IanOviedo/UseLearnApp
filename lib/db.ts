@@ -93,6 +93,19 @@ function obtenerSubtemas(sesionId: number): { id: number, nombre: string, aciert
   }));
 }
 
+// Function to get session details by ID
+function obtenerSesion(sesionId: number): { id: number, topic: string, textoOriginal: string, faseActual: string, modelo: string | null } | null {
+  const statement = db.prepare("SELECT id, topic, texto_original, fase_actual, modelo FROM sesiones WHERE id = ?");
+  const row = statement.get(sesionId) as { id: number, topic: string, texto_original: string, fase_actual: string, modelo: string | null } | undefined;
+  return row ? {
+    id: row.id,
+    topic: row.topic,
+    textoOriginal: row.texto_original,
+    faseActual: row.fase_actual,
+    modelo: row.modelo
+  } : null;
+}
+
 // 3. Export the database connection as the default export, nothing else.
 export default db;
-export { crearSesion, agregarSubtema, obtenerSubtemas, actualizarAciertos };
+export { crearSesion, agregarSubtema, obtenerSubtemas, actualizarAciertos, obtenerSesion };
