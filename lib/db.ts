@@ -1,12 +1,7 @@
 import Database from "better-sqlite3";
 
-// 1. Open (or create) a SQLite database file at the project root called useLearn.db
 const db = new Database("useLearn.db");
 
-// 2. Create these four tables if they don't already exist, using the specified schema.
-// The schema must be executed sequentially.
-
-// sessions table
 db.exec(`CREATE TABLE IF NOT EXISTS sesiones (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   topic TEXT NOT NULL,
@@ -16,7 +11,6 @@ db.exec(`CREATE TABLE IF NOT EXISTS sesiones (
   creada_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 )`);
 
-// subtemas table
 db.exec(`CREATE TABLE IF NOT EXISTS subtemas (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   sesion_id INTEGER NOT NULL REFERENCES sesiones(id),
@@ -25,7 +19,6 @@ db.exec(`CREATE TABLE IF NOT EXISTS subtemas (
   cubierto INTEGER NOT NULL DEFAULT 0
 )`);
 
-// preguntas table
 db.exec(`CREATE TABLE IF NOT EXISTS preguntas (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   sesion_id INTEGER NOT NULL REFERENCES sesiones(id),
@@ -35,7 +28,6 @@ db.exec(`CREATE TABLE IF NOT EXISTS preguntas (
   tipo TEXT NOT NULL CHECK (tipo IN ('multiple_choice', 'libre'))
 )`);
 
-// respuestas table
 db.exec(`CREATE TABLE IF NOT EXISTS respuestas (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   pregunta_id INTEGER NOT NULL REFERENCES preguntas(id),
@@ -44,27 +36,24 @@ db.exec(`CREATE TABLE IF NOT EXISTS respuestas (
   corregido_en TEXT
 )`);
 
-// Function to create a new session
 function crearSesion(topic: string, textoOriginal: string): number {
   const result = db.prepare("INSERT INTO sesiones (topic, texto_original) VALUES (?, ?)")
     .run(topic, textoOriginal);
   return Number(result.lastInsertRowid);
 }
 
-// Function to add a new subtema
 function agregarSubtema(sesionId: number, nombre: string): number {
   const result = db.prepare("INSERT INTO subtemas (sesion_id, nombre) VALUES (?, ?)")
     .run(sesionId, nombre);
   return Number(result.lastInsertRowid);
 }
 
-// Function to update subtema scores
 function actualizarAciertos(subtemaId: number, correcta: boolean): void {
   const statement = db.prepare("SELECT aciertos_seguidos, cubierto FROM subtemas WHERE id = ?");
   const row = statement.get(subtemaId) as { aciertos_seguidos: number, cubierto: number } | undefined;
 
   if (!row) {
-    return; // Subtema not found
+    return;
   }
 
   if (correcta) {
@@ -72,15 +61,13 @@ function actualizarAciertos(subtemaId: number, correcta: boolean): void {
     const newCubierto = newAciertos >= 2 ? 1 : row.cubierto;
 
     db.prepare("UPDATE subtemas SET aciertos_seguidos = ?, cubierto = ? WHERE id = ?")
-        .run(newAciertos, newCubierto, subtemaId);
+      .run(newAciertos, newCubierto, subtemaId);
   } else {
-    // Reset score if incorrect
     db.prepare("UPDATE subtemas SET aciertos_seguidos = 0 WHERE id = ?")
-        .run(subtemaId);
+      .run(subtemaId);
   }
 }
 
-// Function to get subtemas for a session
 function obtenerSubtemas(sesionId: number): { id: number, nombre: string, aciertosSeguidos: number, cubierto: boolean }[] {
   const results = db.prepare("SELECT id, nombre, aciertos_seguidos, cubierto FROM subtemas WHERE sesion_id = ?")
     .all(sesionId) as { id: number, nombre: string, aciertos_seguidos: number, cubierto: number }[];
@@ -93,7 +80,6 @@ function obtenerSubtemas(sesionId: number): { id: number, nombre: string, aciert
   }));
 }
 
-// Function to get session details by ID
 function obtenerSesion(sesionId: number): { id: number, topic: string, textoOriginal: string, faseActual: string, modelo: string | null } | null {
   const statement = db.prepare("SELECT id, topic, texto_original, fase_actual, modelo FROM sesiones WHERE id = ?");
   const row = statement.get(sesionId) as { id: number, topic: string, texto_original: string, fase_actual: string, modelo: string | null } | undefined;
@@ -106,6 +92,24 @@ function obtenerSesion(sesionId: number): { id: number, topic: string, textoOrig
   } : null;
 }
 
-// 3. Export the database connection as the default export, nothing else.
+function elegirSiguienteSubtema(sesionId: number): { id: number, nombre: string, aciertosSeguidos: number, cubierto: boolean } | null {
+  const subtemas = obtenerSubtemas(sesionId);
+  const disponibles = subtemas.filter(subtema => !subtema.cubierto);
+
+  if (disponibles.length === 0) {
+    return null;
+  }
+
+  let minAciertos = Infinity;
+  for (const subtema of disponibles) {
+    if (subtema.aciertosSeguidos < minAciertos) {
+      minAciertos = subtema.aciertosSeguidos;
+    }
+  }
+
+  const siguientes = disponibles.filter(subtema => subtema.aciertosSeguidos === minAciertos);
+  return siguientes[0];
+}
+
 export default db;
-export { crearSesion, agregarSubtema, obtenerSubtemas, actualizarAciertos, obtenerSesion };
+export { crearSesion, agregarSubtema, obtenerSubtemas, actualizarAciertos, obtenerSesion, elegirSiguienteSubtema };
