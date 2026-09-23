@@ -5,24 +5,21 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "lint": "eslint"
   },
   "dependencies": {
-    "@codesandbox/sandpack-react": "^2.20.0",
-    "@reduxjs/toolkit": "^2.12.0",
-    "@tanstack/react-query": "^5.103.2",
-    "better-sqlite3": "^13.0.3",
-    "mermaid": "^12.0.0",
-    "next": "16.3.5",
+    "next": "16.3.6",
     "react": "19.2.8",
-    "react-dom": "19.2.8",
-    "react-redux": "^9.3.0"
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.6",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
