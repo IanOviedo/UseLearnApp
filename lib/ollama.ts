@@ -1,0 +1,184 @@
+export async function extraerSubtemas(texto: string): Promise<string[]> {
+  const response = await fetch("http://localhost:11434/api/generate", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "gemma4:26b",
+      prompt: `Extract the key sub-topics/concepts from the following text. Respond with ONLY a JSON array of short strings, nothing else (example: ["useState básico", "useEffect y dependencias", "props vs state"]).
+
+Text:
+${texto}`,
+      stream: false,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Ollama API error: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+
+  if (typeof data.response !== "string") {
+    throw new Error(`Unexpected Ollama response shape: ${JSON.stringify(data)}`);
+  }
+
+  const rawText = data.response.trim();
+
+  // Limpieza de fences de markdown (```json ... ``` o ``` ... ```)
+  let cleanText = rawText
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/```\s*$/i, "")
+    .trim();
+
+  // Si aun así el modelo agregó texto antes/después del array,
+  // extraemos solo la porción entre el primer [ y el último ]
+  const firstBracket = cleanText.indexOf("[");
+  const lastBracket = cleanText.lastIndexOf("]");
+  if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
+    cleanText = cleanText.slice(firstBracket, lastBracket + 1);
+  }
+
+  try {
+    const subtemas = JSON.parse(cleanText);
+    if (!Array.isArray(subtemas)) {
+      throw new Error("The model response is not a JSON array.");
+    }
+    return subtemas as string[];
+  } catch (error) {
+    console.error("=== RAW MODEL RESPONSE (extraerSubtemas) ===", rawText);
+    throw new Error(
+      `Failed to parse model response as JSON: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+export interface Pregunta {
+  pregunta: string;
+  opciones: string[];
+  respuestaCorrecta: string;
+}
+
+export async function generarPregunta(subtema: string): Promise<Pregunta> {
+  const response = await fetch("http://localhost:11434/api/generate", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "gemma4:26b",
+      prompt: `Generá UNA pregunta de opción múltiple sobre el siguiente sub-tema de React: "${subtema}".
+
+Respondé ÚNICAMENTE con un objeto JSON con esta forma exacta, nada más:
+{"pregunta": "texto de la pregunta", "opciones": ["opción A", "opción B", "opción C", "opción D"], "respuestaCorrecta": "opción A"}
+
+Reglas:
+- Exactamente 4 opciones.
+- "respuestaCorrecta" debe ser el texto exacto de una de las opciones (copiado literal).
+- La pregunta debe evaluar comprensión real, no ser trivial.`,
+      stream: false,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Ollama API error: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+
+  if (typeof data.response !== "string") {
+    throw new Error(`Unexpected Ollama response shape: ${JSON.stringify(data)}`);
+  }
+
+  const rawText = data.response.trim();
+
+  // Limpieza de fences de markdown
+  let cleanText = rawText
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/```\s*$/i, "")
+    .trim();
+
+  // Extraer solo el objeto {...} por si el modelo agrega texto alrededor
+  const firstBrace = cleanText.indexOf("{");
+  const lastBrace = cleanText.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    cleanText = cleanText.slice(firstBrace, lastBrace + 1);
+  }
+
+  try {
+    const parsed = JSON.parse(cleanText);
+
+    // Validación de forma, no solo que sea JSON válido
+    if (
+      typeof parsed.pregunta !== "string" ||
+      !Array.isArray(parsed.opciones) ||
+      parsed.opciones.length !== 4 ||
+      typeof parsed.respuestaCorrecta !== "string" ||
+      !parsed.opciones.includes(parsed.respuestaCorrecta)
+    ) {
+      throw new Error(
+        `Estructura inválida: ${JSON.stringify(parsed)}`
+      );
+    }
+
+    return parsed as Pregunta;
+  } catch (error) {
+    console.error("=== RAW MODEL RESPONSE (generarPregunta) ===", rawText);
+    throw new Error(
+      `Failed to parse model response as JSON: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+export interface ResultadoSubtema {
+  nombre: string;
+  correctas: number;
+  incorrectas: number;
+  cubierto: boolean;
+}
+
+export async function generarFeedbackSondeo(
+  resultados: ResultadoSubtema[]
+): Promise<string> {
+  const resumen = resultados
+    .map(
+      (r) =>
+        `- ${r.nombre}: ${r.correctas} correctas, ${r.incorrectas} incorrectas${
+          r.cubierto ? " (dominado)" : " (débil)"
+        }`
+    )
+    .join("\n");
+
+  const response = await fetch("http://localhost:11434/api/generate", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "gemma4:26b",
+      prompt: `Sos un tutor de React. Un estudiante acaba de terminar un sondeo (quiz de diagnóstico) sobre varios sub-temas. Este es el resultado por sub-tema:
+
+${resumen}
+
+Escribí un feedback breve (3-5 oraciones) en español, directo y útil:
+- Destacá qué domina bien.
+- Señalá específicamente qué sub-temas necesita reforzar y por qué eso importa en la práctica.
+- No repitas los números tal cual (ya los vio), interpretalos.
+- Tono cercano, no genérico ni de manual.`,
+      stream: false,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Ollama API error: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+
+  if (typeof data.response !== "string") {
+    throw new Error(`Unexpected Ollama response shape: ${JSON.stringify(data)}`);
+  }
+
+  return data.response.trim();
+}
