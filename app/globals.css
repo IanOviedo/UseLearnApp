@@ -43,3 +43,29 @@ body {
 .animate-blob-slower {
   animation: blob-slower 24s ease-in-out infinite;
 }
+
+/* Scrollbar moderno para el textarea de notas */
+.notas-textarea {
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: rgba(255, 255, 255, 0.25) transparent; /* Firefox */
+}
+
+.notas-textarea::-webkit-scrollbar {
+  width: 8px;
+}
+
+.notas-textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.notas-textarea::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.notas-textarea::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.35);
+}
+

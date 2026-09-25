@@ -5,19 +5,39 @@ import { useRouter } from "next/navigation";
 
 const MODELOS_DISPONIBLES = ["GPT-OSS 20B", "Gemma 4 26B", "Llama 3.1 8B"];
 
+type EstadoQuiz = "idle" | "generando" | "listo";
+
+
+const COPY_POR_ESTADO: Record<EstadoQuiz, { titulo: string; subtitulo: string }> = {
+  idle: {
+    titulo: "Generá tu quiz",
+    subtitulo: "Pegá o subí tu texto y generá el quiz.",
+  },
+  generando: {
+    titulo: "Generando...",
+    subtitulo: "La IA está armando las preguntas.",
+  },
+  listo: {
+    titulo: "¡Quiz listo!",
+    subtitulo: "Ya podés pasar al sondeo.",
+  },
+};
+
 export default function HomePage() {
   const router = useRouter();
   const [texto, setTexto] = useState("");
-  const [cargando, setCargando] = useState(false);
+  const [estadoQuiz, setEstadoQuiz] = useState<EstadoQuiz>("idle");
+  const [sesionId, setSesionId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [modeloAbierto, setModeloAbierto] = useState(false);
   const [modeloSeleccionado, setModeloSeleccionado] = useState(MODELOS_DISPONIBLES[0]);
   const [ajustesAbiertos, setAjustesAbiertos] = useState(false);
   const [sesionesAbiertas, setSesionesAbiertas] = useState(true);
+  const [subiendoArchivo, setSubiendoArchivo] = useState(false);
 
-  async function pasarAlSondeo() {
+  async function generarQuiz() {
     if (!texto.trim()) return;
-    setCargando(true);
+    setEstadoQuiz("generando");
     setError(null);
     try {
       const res = await fetch("/api/sesiones/crear", {
@@ -28,15 +48,66 @@ export default function HomePage() {
       const data = await res.json();
       if (data.error) {
         setError(data.error);
+        setEstadoQuiz("idle");
         return;
       }
-      router.push(`/sondeo/${data.sesionId}`);
+      setSesionId(data.sesionId);
+      setEstadoQuiz("listo");
     } catch {
       setError("No se pudo conectar con el servidor.");
-    } finally {
-      setCargando(false);
+      setEstadoQuiz("idle");
     }
   }
+
+  function pasarAlSondeo() {
+    if (!sesionId) return;
+    router.push(`/sondeo/${sesionId}`);
+  }
+
+  function manejarCambioTexto(nuevoTexto: string) {
+    setTexto(nuevoTexto);
+    if (estadoQuiz === "listo") {
+      setEstadoQuiz("idle");
+      setSesionId(null);
+    }
+  }
+
+  async function manejarArchivo(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const extension = file.name.split(".").pop()?.toLowerCase();
+    setSubiendoArchivo(true);
+    setError(null);
+
+    try {
+      if (extension === "txt" || extension === "md") {
+        const contenido = await file.text();
+        manejarCambioTexto(texto ? texto + "\n\n" + contenido : contenido);
+      } else if (extension === "pdf") {
+        const formData = new FormData();
+        formData.append("archivo", file);
+        const res = await fetch("/api/archivos/extraer-pdf", {
+          method: "POST",
+          body: formData,
+        });
+        const data = await res.json();
+        if (data.error) {
+          setError(data.error);
+          return;
+        }
+        manejarCambioTexto(texto ? texto + "\n\n" + data.texto : data.texto);
+      } else {
+        setError("Formato no soportado. Usá .txt, .md o .pdf.");
+      }
+    } catch {
+      setError("No se pudo leer el archivo.");
+    } finally {
+      setSubiendoArchivo(false);
+      e.target.value = "";
+    }
+  }
+
 
   return (
     <div className="relative min-h-screen bg-neutral-950 text-neutral-100 overflow-hidden">
@@ -111,41 +182,62 @@ export default function HomePage() {
             </div>
             <textarea
               value={texto}
-              onChange={(e) => setTexto(e.target.value)}
-              disabled={cargando}
+              onChange={(e) => manejarCambioTexto(e.target.value)}
+              disabled={estadoQuiz === "generando"}
               placeholder="Puedes pegar un texto, una pregunta, una imagen o lo que quieras revisar."
-              className="flex-1 resize-none bg-transparent text-sm text-neutral-300 placeholder:text-neutral-600 focus:outline-none disabled:opacity-50"
+              className="notas-textarea flex-1 resize-none bg-transparent text-sm text-neutral-300 placeholder:text-neutral-600 focus:outline-none disabled:opacity-50"
             />
-            <button
-              onClick={() => setTexto("")}
-              disabled={cargando}
-              className="self-start mt-4 flex items-center gap-2 rounded-full border border-neutral-700 px-4 py-1.5 text-sm text-neutral-300 hover:border-neutral-500 disabled:opacity-40"
-            >
-              ⤢ Limpiar texto
-            </button>
+<div className="self-start mt-4 flex items-center gap-2">
+  <button
+    onClick={() => setTexto("")}
+    disabled={estadoQuiz === "generando"}
+    className="flex items-center gap-2 rounded-full border border-neutral-700 px-4 py-1.5 text-sm text-neutral-300 hover:border-neutral-500 disabled:opacity-40"
+  >
+    ⤢ Limpiar texto
+  </button>
+  <label
+    className={`flex items-center justify-center h-8 w-8 rounded-full border border-neutral-700 text-neutral-300 hover:border-neutral-500 cursor-pointer ${
+      subiendoArchivo || estadoQuiz === "generando" ? "opacity-40 pointer-events-none" : ""
+    }`}
+  >
+    +
+    <input
+      type="file"
+      accept=".txt,.md,.pdf"
+      onChange={manejarArchivo}
+      className="hidden"
+      disabled={subiendoArchivo || estadoQuiz === "generando"}
+    />
+  </label>
+  {subiendoArchivo && (
+    <span className="text-xs text-neutral-500">Leyendo archivo...</span>
+  )}
+</div>
           </div>
 
-          {/* Quiz listo */}
+          {/* Quiz — copy dinámico según estadoQuiz */}
           <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-6 flex flex-col">
             <div className="flex items-center gap-2 mb-1">
               <span>✦</span>
-              <span className="font-semibold">Quiz listo</span>
+              <span className="font-semibold">{COPY_POR_ESTADO[estadoQuiz].titulo}</span>
             </div>
-            <p className="text-sm text-neutral-500 mb-6">Genera un quiz a partir de tu texto.</p>
+            <p className="text-sm text-neutral-500 mb-6">{COPY_POR_ESTADO[estadoQuiz].subtitulo}</p>
 
             <button
-              onClick={pasarAlSondeo}
-              disabled={!texto.trim() || cargando}
+              onClick={estadoQuiz === "listo" ? pasarAlSondeo : generarQuiz}
+              disabled={!texto.trim() || estadoQuiz === "generando"}
               className={`flex items-center justify-between rounded-full px-5 py-3 font-medium transition-colors ${
-                cargando
+                estadoQuiz === "generando"
                   ? "bg-neutral-800 text-neutral-500 cursor-not-allowed"
                   : "bg-neutral-100 text-neutral-900 disabled:opacity-40 disabled:cursor-not-allowed"
               }`}
             >
               <span className="flex items-center gap-2">
-                {cargando ? "⏳ Generando quiz..." : "▶ Pasar al sondeo"}
+                {estadoQuiz === "generando" && "⏳ Generando quiz..."}
+                {estadoQuiz === "listo" && "▶ Pasar al sondeo"}
+                {estadoQuiz === "idle" && "✦ Generar quiz"}
               </span>
-              {!cargando && <span className="ml-2">→</span>}
+              {estadoQuiz !== "generando" && <span className="ml-2">→</span>}
             </button>
 
             {error && <p className="text-red-500 text-xs mt-3">{error}</p>}
