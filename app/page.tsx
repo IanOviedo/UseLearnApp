@@ -1,12 +1,11 @@
 ﻿"use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 const MODELOS_DISPONIBLES = ["GPT-OSS 20B", "Gemma 4 26B", "Llama 3.1 8B"];
 
 type EstadoQuiz = "idle" | "generando" | "listo";
-
 
 const COPY_POR_ESTADO: Record<EstadoQuiz, { titulo: string; subtitulo: string }> = {
   idle: {
@@ -23,17 +22,62 @@ const COPY_POR_ESTADO: Record<EstadoQuiz, { titulo: string; subtitulo: string }>
   },
 };
 
+interface ModeloOllama {
+  nombre: string;
+  tamano: number;
+}
+
 export default function HomePage() {
   const router = useRouter();
   const [texto, setTexto] = useState("");
   const [estadoQuiz, setEstadoQuiz] = useState<EstadoQuiz>("idle");
   const [sesionId, setSesionId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const [ajustesModalAbierto, setAjustesModalAbierto] = useState(false);
+  const [modelosDisponibles, setModelosDisponibles] = useState<ModeloOllama[]>([]);
+  const [cargandoModelos, setCargandoModelos] = useState(false);
+  const [modeloPrincipal, setModeloPrincipal] = useState("gemma4:26b");
+  const [modeloPreguntas, setModeloPreguntas] = useState("gemma4:26b");
+
   const [modeloAbierto, setModeloAbierto] = useState(false);
   const [modeloSeleccionado, setModeloSeleccionado] = useState(MODELOS_DISPONIBLES[0]);
-  const [ajustesAbiertos, setAjustesAbiertos] = useState(false);
   const [sesionesAbiertas, setSesionesAbiertas] = useState(true);
   const [subiendoArchivo, setSubiendoArchivo] = useState(false);
+
+  useEffect(() => {
+    const guardadoPrincipal = localStorage.getItem("uselearn:modeloPrincipal");
+    const guardadoPreguntas = localStorage.getItem("uselearn:modeloPreguntas");
+    if (guardadoPrincipal) setModeloPrincipal(guardadoPrincipal);
+    if (guardadoPreguntas) setModeloPreguntas(guardadoPreguntas);
+  }, []);
+
+  async function abrirAjustes() {
+    setAjustesModalAbierto(true);
+    setModeloAbierto(false);
+    setCargandoModelos(true);
+    try {
+      const res = await fetch("/api/modelos/listar");
+      const data = await res.json();
+      if (data.modelos) {
+        setModelosDisponibles(data.modelos);
+      }
+    } catch {
+      // silencioso: el modal muestra el estado vacío si falla
+    } finally {
+      setCargandoModelos(false);
+    }
+  }
+
+  function guardarModeloPrincipal(nombre: string) {
+    setModeloPrincipal(nombre);
+    localStorage.setItem("uselearn:modeloPrincipal", nombre);
+  }
+
+  function guardarModeloPreguntas(nombre: string) {
+    setModeloPreguntas(nombre);
+    localStorage.setItem("uselearn:modeloPreguntas", nombre);
+  }
 
   async function generarQuiz() {
     if (!texto.trim()) return;
@@ -108,7 +152,6 @@ export default function HomePage() {
     }
   }
 
-
   return (
     <div className="relative min-h-screen bg-neutral-950 text-neutral-100 overflow-hidden">
       {/* Fondo decorativo */}
@@ -149,17 +192,11 @@ export default function HomePage() {
             </div>
           )}
           <button
-            onClick={() => setAjustesAbiertos((v) => !v)}
+            onClick={abrirAjustes}
             className="rounded-full border border-neutral-800 bg-neutral-900 h-8 w-8 flex items-center justify-center text-neutral-400"
           >
             ⚙
           </button>
-          {ajustesAbiertos && (
-            <div className="absolute right-0 top-10 w-64 rounded-lg border border-neutral-800 bg-neutral-900 p-4 shadow-xl z-10 text-sm text-neutral-400">
-              <p className="font-medium text-neutral-200 mb-2">Ajustes</p>
-              <p>Configuración de API (local / nube) — próximamente.</p>
-            </div>
-          )}
         </div>
       </header>
 
@@ -187,32 +224,32 @@ export default function HomePage() {
               placeholder="Puedes pegar un texto, una pregunta, una imagen o lo que quieras revisar."
               className="notas-textarea flex-1 resize-none bg-transparent text-sm text-neutral-300 placeholder:text-neutral-600 focus:outline-none disabled:opacity-50"
             />
-<div className="self-start mt-4 flex items-center gap-2">
-  <button
-    onClick={() => setTexto("")}
-    disabled={estadoQuiz === "generando"}
-    className="flex items-center gap-2 rounded-full border border-neutral-700 px-4 py-1.5 text-sm text-neutral-300 hover:border-neutral-500 disabled:opacity-40"
-  >
-    ⤢ Limpiar texto
-  </button>
-  <label
-    className={`flex items-center justify-center h-8 w-8 rounded-full border border-neutral-700 text-neutral-300 hover:border-neutral-500 cursor-pointer ${
-      subiendoArchivo || estadoQuiz === "generando" ? "opacity-40 pointer-events-none" : ""
-    }`}
-  >
-    +
-    <input
-      type="file"
-      accept=".txt,.md,.pdf"
-      onChange={manejarArchivo}
-      className="hidden"
-      disabled={subiendoArchivo || estadoQuiz === "generando"}
-    />
-  </label>
-  {subiendoArchivo && (
-    <span className="text-xs text-neutral-500">Leyendo archivo...</span>
-  )}
-</div>
+            <div className="self-start mt-4 flex items-center gap-2">
+              <button
+                onClick={() => setTexto("")}
+                disabled={estadoQuiz === "generando"}
+                className="flex items-center gap-2 rounded-full border border-neutral-700 px-4 py-1.5 text-sm text-neutral-300 hover:border-neutral-500 disabled:opacity-40"
+              >
+                ⤢ Limpiar texto
+              </button>
+              <label
+                className={`flex items-center justify-center h-8 w-8 rounded-full border border-neutral-700 text-neutral-300 hover:border-neutral-500 cursor-pointer ${
+                  subiendoArchivo || estadoQuiz === "generando" ? "opacity-40 pointer-events-none" : ""
+                }`}
+              >
+                +
+                <input
+                  type="file"
+                  accept=".txt,.md,.pdf"
+                  onChange={manejarArchivo}
+                  className="hidden"
+                  disabled={subiendoArchivo || estadoQuiz === "generando"}
+                />
+              </label>
+              {subiendoArchivo && (
+                <span className="text-xs text-neutral-500">Leyendo archivo...</span>
+              )}
+            </div>
           </div>
 
           {/* Quiz — copy dinámico según estadoQuiz */}
@@ -258,6 +295,85 @@ export default function HomePage() {
           </span>
         </button>
       </main>
+
+      {/* Modal de Ajustes */}
+      {ajustesModalAbierto && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => setAjustesModalAbierto(false)}
+        >
+          <div
+            className="w-full max-w-lg rounded-xl border border-neutral-800 bg-neutral-950 p-6 max-h-[80vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-semibold">Ajustes</h2>
+              <button
+                onClick={() => setAjustesModalAbierto(false)}
+                className="text-neutral-500 hover:text-neutral-300 text-xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="mb-6">
+              <p className="text-sm font-medium text-neutral-200 mb-1">
+                Modelo para sub-temas y feedback
+              </p>
+              <p className="text-xs text-neutral-500 mb-3">
+                Se usa al generar el quiz y al mostrar el feedback final del sondeo.
+              </p>
+              {cargandoModelos ? (
+                <p className="text-xs text-neutral-600">Cargando modelos...</p>
+              ) : modelosDisponibles.length === 0 ? (
+                <p className="text-xs text-red-500">
+                  No se pudo conectar con Ollama en localhost:11434.
+                </p>
+              ) : (
+                <select
+                  value={modeloPrincipal}
+                  onChange={(e) => guardarModeloPrincipal(e.target.value)}
+                  className="w-full rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm"
+                >
+                  {modelosDisponibles.map((m) => (
+                    <option key={m.nombre} value={m.nombre}>
+                      {m.nombre}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            <div className="mb-2">
+              <p className="text-sm font-medium text-neutral-200 mb-1">
+                Modelo para preguntas del sondeo
+              </p>
+              <p className="text-xs text-neutral-500 mb-3">
+                Se usa una vez por cada pregunta — un modelo más liviano acelera el sondeo.
+              </p>
+              {cargandoModelos ? (
+                <p className="text-xs text-neutral-600">Cargando modelos...</p>
+              ) : modelosDisponibles.length === 0 ? (
+                <p className="text-xs text-red-500">
+                  No se pudo conectar con Ollama en localhost:11434.
+                </p>
+              ) : (
+                <select
+                  value={modeloPreguntas}
+                  onChange={(e) => guardarModeloPreguntas(e.target.value)}
+                  className="w-full rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm"
+                >
+                  {modelosDisponibles.map((m) => (
+                    <option key={m.nombre} value={m.nombre}>
+                      {m.nombre}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
