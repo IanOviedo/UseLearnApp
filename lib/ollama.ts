@@ -60,7 +60,7 @@ export interface Pregunta {
   respuestaCorrecta: string;
 }
 
-export async function generarPregunta(subtema: string): Promise<Pregunta> {
+export async function generarPregunta(subtema: string, textoOriginal: string): Promise<Pregunta> {
   const response = await fetch("http://localhost:11434/api/generate", {
     method: "POST",
     headers: {
@@ -68,12 +68,20 @@ export async function generarPregunta(subtema: string): Promise<Pregunta> {
     },
     body: JSON.stringify({
       model: "gemma4:26b",
-      prompt: `Generá UNA pregunta de opción múltiple sobre el siguiente sub-tema de React: "${subtema}".
+      prompt: `Sos un asistente que genera preguntas de opción múltiple ÚNICAMENTE a partir del siguiente texto de estudio. No uses conocimiento externo ni inventes información que no esté en el texto.
+
+Texto de estudio:
+"""
+${textoOriginal}
+"""
+
+Generá UNA pregunta de opción múltiple sobre el sub-tema "${subtema}", basada estrictamente en el contenido del texto de arriba.
 
 Respondé ÚNICAMENTE con un objeto JSON con esta forma exacta, nada más:
 {"pregunta": "texto de la pregunta", "opciones": ["opción A", "opción B", "opción C", "opción D"], "respuestaCorrecta": "opción A"}
 
 Reglas:
+- La pregunta y todas las opciones deben basarse solo en lo que dice el texto de estudio, no en conocimiento general de React.
 - Exactamente 4 opciones.
 - "respuestaCorrecta" debe ser el texto exacto de una de las opciones (copiado literal).
 - La pregunta debe evaluar comprensión real, no ser trivial.`,
@@ -93,13 +101,11 @@ Reglas:
 
   const rawText = data.response.trim();
 
-  // Limpieza de fences de markdown
   let cleanText = rawText
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/```\s*$/i, "")
     .trim();
 
-  // Extraer solo el objeto {...} por si el modelo agrega texto alrededor
   const firstBrace = cleanText.indexOf("{");
   const lastBrace = cleanText.lastIndexOf("}");
   if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
@@ -109,7 +115,6 @@ Reglas:
   try {
     const parsed = JSON.parse(cleanText);
 
-    // Validación de forma, no solo que sea JSON válido
     if (
       typeof parsed.pregunta !== "string" ||
       !Array.isArray(parsed.opciones) ||

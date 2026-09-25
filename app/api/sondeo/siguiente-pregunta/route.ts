@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   elegirSiguienteSubtema,
   obtenerSubtemas,
+  obtenerSesion,
   sondeoCompleto,
 } from "@/lib/db";
 import { generarPregunta, generarFeedbackSondeo } from "@/lib/ollama";
@@ -28,6 +29,15 @@ export async function GET(request: NextRequest) {
       const feedback = await generarFeedbackSondeo(resultados);
       return NextResponse.json({ completo: true, feedback });
     }
+
+    const sesion = obtenerSesion(sesionId);
+if (!sesion) {
+  return NextResponse.json(
+    { error: "Sesión no encontrada" },
+    { status: 404 }
+  );
+}
+
     const subtema = elegirSiguienteSubtema(sesionId);
     if (!subtema) {
       return NextResponse.json(
@@ -35,7 +45,7 @@ export async function GET(request: NextRequest) {
         { status: 400 }
       );
     }
-    const pregunta = await generarPregunta(subtema.nombre);
+    const pregunta = await generarPregunta(subtema.nombre, sesion.textoOriginal);
     return NextResponse.json({
       completo: false,
       subtemaId: subtema.id,
