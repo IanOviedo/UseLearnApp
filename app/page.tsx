@@ -1,68 +1,170 @@
-import Image from "next/image";
+﻿"use client";
 
-export default function Home() {
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+
+const MODELOS_DISPONIBLES = ["GPT-OSS 20B", "Gemma 4 26B", "Llama 3.1 8B"];
+
+export default function HomePage() {
+  const router = useRouter();
+  const [texto, setTexto] = useState("");
+  const [cargando, setCargando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [modeloAbierto, setModeloAbierto] = useState(false);
+  const [modeloSeleccionado, setModeloSeleccionado] = useState(MODELOS_DISPONIBLES[0]);
+  const [ajustesAbiertos, setAjustesAbiertos] = useState(false);
+  const [sesionesAbiertas, setSesionesAbiertas] = useState(true);
+
+  async function pasarAlSondeo() {
+    if (!texto.trim()) return;
+    setCargando(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/sesiones/crear", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ texto }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        setError(data.error);
+        return;
+      }
+      router.push(`/sondeo/${data.sesionId}`);
+    } catch {
+      setError("No se pudo conectar con el servidor.");
+    } finally {
+      setCargando(false);
+    }
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <div className="relative min-h-screen bg-neutral-950 text-neutral-100 overflow-hidden">
+      {/* Fondo decorativo */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute -left-32 top-1/3 h-96 w-96 rounded-full bg-indigo-500/10 blur-3xl animate-blob-slow" />
+        <div className="absolute -right-24 top-10 h-80 w-80 rounded-full bg-sky-500/10 blur-3xl animate-blob-slower" />
+        <div className="absolute left-1/3 bottom-0 h-72 w-72 rounded-full bg-violet-500/10 blur-3xl animate-blob-slow" />
+      </div>
+
+      {/* Header */}
+      <header className="relative z-10 flex items-center justify-between px-8 py-4 border-b border-neutral-900">
+        <span className="text-sm font-semibold tracking-widest">USELEARN</span>
+        <div className="flex items-center gap-3 relative">
+          <button
+            onClick={() => setModeloAbierto((v) => !v)}
+            className="flex items-center gap-2 rounded-full border border-neutral-800 bg-neutral-900 px-4 py-1.5 text-sm"
           >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
+            <span>✦</span>
+            Ask {modeloSeleccionado}
+            <span className="text-neutral-500">▾</span>
+          </button>
+          {modeloAbierto && (
+            <div className="absolute right-24 top-10 w-56 rounded-lg border border-neutral-800 bg-neutral-900 p-1 shadow-xl z-10">
+              {MODELOS_DISPONIBLES.map((m) => (
+                <button
+                  key={m}
+                  onClick={() => {
+                    setModeloSeleccionado(m);
+                    setModeloAbierto(false);
+                  }}
+                  className={`block w-full text-left text-sm rounded-md px-3 py-2 hover:bg-neutral-800 ${
+                    m === modeloSeleccionado ? "text-neutral-100" : "text-neutral-400"
+                  }`}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+          )}
+          <button
+            onClick={() => setAjustesAbiertos((v) => !v)}
+            className="rounded-full border border-neutral-800 bg-neutral-900 h-8 w-8 flex items-center justify-center text-neutral-400"
+          >
+            ⚙
+          </button>
+          {ajustesAbiertos && (
+            <div className="absolute right-0 top-10 w-64 rounded-lg border border-neutral-800 bg-neutral-900 p-4 shadow-xl z-10 text-sm text-neutral-400">
+              <p className="font-medium text-neutral-200 mb-2">Ajustes</p>
+              <p>Configuración de API (local / nube) — próximamente.</p>
+            </div>
+          )}
+        </div>
+      </header>
+
+      {/* Body */}
+      <main className="relative z-10 max-w-5xl mx-auto px-8 py-12">
+        <p className="text-xs tracking-widest text-neutral-500 mb-2">— TU CAMINO DE APRENDIZAJE</p>
+        <h1 className="text-4xl font-bold mb-3">Bienvenido de nuevo</h1>
+        <p className="text-neutral-400 mb-10">
+          Aquí es donde comienzas, exploras y practicas.
+          <br />
+          La IA te guía, tú controlas el ritmo.
+        </p>
+
+        <div className="grid grid-cols-3 gap-6">
+          {/* Textarea */}
+          <div className="col-span-2 rounded-xl border border-neutral-800 bg-neutral-900/50 p-6 flex flex-col min-h-[320px]">
+            <div className="flex items-center gap-2 text-neutral-300 mb-4">
+              <span>📄</span>
+              <span className="font-medium">Pega tus notas o lo que sea...</span>
+            </div>
+            <textarea
+              value={texto}
+              onChange={(e) => setTexto(e.target.value)}
+              disabled={cargando}
+              placeholder="Puedes pegar un texto, una pregunta, una imagen o lo que quieras revisar."
+              className="flex-1 resize-none bg-transparent text-sm text-neutral-300 placeholder:text-neutral-600 focus:outline-none disabled:opacity-50"
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            <button
+              onClick={() => setTexto("")}
+              disabled={cargando}
+              className="self-start mt-4 flex items-center gap-2 rounded-full border border-neutral-700 px-4 py-1.5 text-sm text-neutral-300 hover:border-neutral-500 disabled:opacity-40"
+            >
+              ⤢ Limpiar texto
+            </button>
+          </div>
+
+          {/* Quiz listo */}
+          <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-6 flex flex-col">
+            <div className="flex items-center gap-2 mb-1">
+              <span>✦</span>
+              <span className="font-semibold">Quiz listo</span>
+            </div>
+            <p className="text-sm text-neutral-500 mb-6">Genera un quiz a partir de tu texto.</p>
+
+            <button
+              onClick={pasarAlSondeo}
+              disabled={!texto.trim() || cargando}
+              className={`flex items-center justify-between rounded-full px-5 py-3 font-medium transition-colors ${
+                cargando
+                  ? "bg-neutral-800 text-neutral-500 cursor-not-allowed"
+                  : "bg-neutral-100 text-neutral-900 disabled:opacity-40 disabled:cursor-not-allowed"
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                {cargando ? "⏳ Generando quiz..." : "▶ Pasar al sondeo"}
+              </span>
+              {!cargando && <span className="ml-2">→</span>}
+            </button>
+
+            {error && <p className="text-red-500 text-xs mt-3">{error}</p>}
+          </div>
         </div>
+
+        {/* Sesiones pasadas */}
+        <button
+          onClick={() => setSesionesAbiertas((v) => !v)}
+          className="mt-6 w-full rounded-xl border border-neutral-800 bg-neutral-900/50 p-6 flex items-center gap-3 text-neutral-400 text-left"
+        >
+          <span className="text-xl">🕓</span>
+          <span className="font-medium text-neutral-200">Sesiones pasadas</span>
+          <span
+            className={`transition-transform ${sesionesAbiertas ? "rotate-0" : "rotate-180"}`}
+          >
+            ↑
+          </span>
+        </button>
       </main>
     </div>
   );

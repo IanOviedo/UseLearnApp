@@ -11,6 +11,8 @@ db.exec(`CREATE TABLE IF NOT EXISTS sesiones (
   creada_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 )`);
 
+
+
 db.exec(`CREATE TABLE IF NOT EXISTS subtemas (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   sesion_id INTEGER NOT NULL REFERENCES sesiones(id),
@@ -18,6 +20,13 @@ db.exec(`CREATE TABLE IF NOT EXISTS subtemas (
   aciertos_seguidos INTEGER NOT NULL DEFAULT 0,
   cubierto INTEGER NOT NULL DEFAULT 0
 )`);
+
+// Migración: agregar total_incorrectas si no existe todavía (para bases ya creadas)
+const columnasSubtemas = db.prepare("PRAGMA table_info(subtemas)").all() as { name: string }[];
+const tieneTotalIncorrectas = columnasSubtemas.some(col => col.name === "total_incorrectas");
+if (!tieneTotalIncorrectas) {
+  db.exec("ALTER TABLE subtemas ADD COLUMN total_incorrectas INTEGER NOT NULL DEFAULT 0");
+}
 
 db.exec(`CREATE TABLE IF NOT EXISTS preguntas (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,20 +72,21 @@ function actualizarAciertos(subtemaId: number, correcta: boolean): void {
     db.prepare("UPDATE subtemas SET aciertos_seguidos = ?, cubierto = ? WHERE id = ?")
       .run(newAciertos, newCubierto, subtemaId);
   } else {
-    db.prepare("UPDATE subtemas SET aciertos_seguidos = 0 WHERE id = ?")
+    db.prepare("UPDATE subtemas SET aciertos_seguidos = 0, total_incorrectas = total_incorrectas + 1 WHERE id = ?")
       .run(subtemaId);
   }
 }
 
-function obtenerSubtemas(sesionId: number): { id: number, nombre: string, aciertosSeguidos: number, cubierto: boolean }[] {
-  const results = db.prepare("SELECT id, nombre, aciertos_seguidos, cubierto FROM subtemas WHERE sesion_id = ?")
-    .all(sesionId) as { id: number, nombre: string, aciertos_seguidos: number, cubierto: number }[];
+function obtenerSubtemas(sesionId: number): { id: number, nombre: string, aciertosSeguidos: number, cubierto: boolean, totalIncorrectas: number }[] {
+  const results = db.prepare("SELECT id, nombre, aciertos_seguidos, cubierto, total_incorrectas FROM subtemas WHERE sesion_id = ?")
+    .all(sesionId) as { id: number, nombre: string, aciertos_seguidos: number, cubierto: number, total_incorrectas: number }[];
 
   return results.map(row => ({
     id: row.id,
     nombre: row.nombre,
     aciertosSeguidos: row.aciertos_seguidos,
-    cubierto: row.cubierto === 1
+    cubierto: row.cubierto === 1,
+    totalIncorrectas: row.total_incorrectas
   }));
 }
 

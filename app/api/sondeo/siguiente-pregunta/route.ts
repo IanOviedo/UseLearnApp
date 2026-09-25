@@ -17,12 +17,14 @@ export async function GET(request: NextRequest) {
   try {
     if (sondeoCompleto(sesionId)) {
       const subtemas = obtenerSubtemas(sesionId);
-      const resultados = subtemas.map((s) => ({
+
+        const resultados = subtemas.map((s) => ({
         nombre: s.nombre,
         correctas: s.aciertosSeguidos,
-        incorrectas: 0,
+        incorrectas: s.totalIncorrectas,
         cubierto: s.cubierto,
       }));
+
       const feedback = await generarFeedbackSondeo(resultados);
       return NextResponse.json({ completo: true, feedback });
     }
