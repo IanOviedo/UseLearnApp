@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import pdf from "pdf-parse";
+import { PDFParse } from "pdf-parse";
 
 export async function POST(request: NextRequest) {
   try {
@@ -11,9 +11,14 @@ export async function POST(request: NextRequest) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const data = await pdf(buffer);
+    const parser = new PDFParse({ data: buffer });
 
-    return NextResponse.json({ texto: data.text });
+    try {
+      const data = await parser.getText();
+      return NextResponse.json({ texto: data.text });
+    } finally {
+      await parser.destroy();
+    }
   } catch (error) {
     console.error("Error extrayendo PDF:", error);
     return NextResponse.json(
