@@ -9,6 +9,9 @@ import { generarPregunta, generarFeedbackSondeo } from "@/lib/ollama";
 
 export async function GET(request: NextRequest) {
   const sesionId = Number(request.nextUrl.searchParams.get("sesionId"));
+  const modeloPreguntas = request.nextUrl.searchParams.get("modeloPreguntas") ?? undefined;
+  const modeloPrincipal = request.nextUrl.searchParams.get("modeloPrincipal") ?? undefined;
+
   if (!sesionId) {
     return NextResponse.json(
       { error: "Falta el parámetro sesionId" },
@@ -26,7 +29,7 @@ export async function GET(request: NextRequest) {
         cubierto: s.cubierto,
       }));
 
-      const feedback = await generarFeedbackSondeo(resultados);
+      const feedback = await generarFeedbackSondeo(resultados, modeloPrincipal);
       return NextResponse.json({ completo: true, feedback });
     }
 
@@ -45,7 +48,7 @@ if (!sesion) {
         { status: 400 }
       );
     }
-    const pregunta = await generarPregunta(subtema.nombre, sesion.textoOriginal);
+    const pregunta = await generarPregunta(subtema.nombre, sesion.textoOriginal, modeloPreguntas);
     return NextResponse.json({
       completo: false,
       subtemaId: subtema.id,

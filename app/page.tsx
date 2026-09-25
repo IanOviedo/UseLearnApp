@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
-const MODELOS_DISPONIBLES = ["GPT-OSS 20B", "Gemma 4 26B", "Llama 3.1 8B"];
 
 type EstadoQuiz = "idle" | "generando" | "listo";
 
@@ -40,8 +39,7 @@ export default function HomePage() {
   const [modeloPrincipal, setModeloPrincipal] = useState("gemma4:26b");
   const [modeloPreguntas, setModeloPreguntas] = useState("gemma4:26b");
 
-  const [modeloAbierto, setModeloAbierto] = useState(false);
-  const [modeloSeleccionado, setModeloSeleccionado] = useState(MODELOS_DISPONIBLES[0]);
+
   const [sesionesAbiertas, setSesionesAbiertas] = useState(true);
   const [subiendoArchivo, setSubiendoArchivo] = useState(false);
 
@@ -54,7 +52,6 @@ export default function HomePage() {
 
   async function abrirAjustes() {
     setAjustesModalAbierto(true);
-    setModeloAbierto(false);
     setCargandoModelos(true);
     try {
       const res = await fetch("/api/modelos/listar");
@@ -87,7 +84,8 @@ export default function HomePage() {
       const res = await fetch("/api/sesiones/crear", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ texto }),
+        body: JSON.stringify({ texto, modelo: modeloPrincipal }),
+        
       });
       const data = await res.json();
       if (data.error) {
@@ -165,32 +163,7 @@ export default function HomePage() {
       <header className="relative z-10 flex items-center justify-between px-8 py-4 border-b border-neutral-900">
         <span className="text-sm font-semibold tracking-widest">USELEARN</span>
         <div className="flex items-center gap-3 relative">
-          <button
-            onClick={() => setModeloAbierto((v) => !v)}
-            className="flex items-center gap-2 rounded-full border border-neutral-800 bg-neutral-900 px-4 py-1.5 text-sm"
-          >
-            <span>✦</span>
-            Ask {modeloSeleccionado}
-            <span className="text-neutral-500">▾</span>
-          </button>
-          {modeloAbierto && (
-            <div className="absolute right-24 top-10 w-56 rounded-lg border border-neutral-800 bg-neutral-900 p-1 shadow-xl z-10">
-              {MODELOS_DISPONIBLES.map((m) => (
-                <button
-                  key={m}
-                  onClick={() => {
-                    setModeloSeleccionado(m);
-                    setModeloAbierto(false);
-                  }}
-                  className={`block w-full text-left text-sm rounded-md px-3 py-2 hover:bg-neutral-800 ${
-                    m === modeloSeleccionado ? "text-neutral-100" : "text-neutral-400"
-                  }`}
-                >
-                  {m}
-                </button>
-              ))}
-            </div>
-          )}
+
           <button
             onClick={abrirAjustes}
             className="rounded-full border border-neutral-800 bg-neutral-900 h-8 w-8 flex items-center justify-center text-neutral-400"

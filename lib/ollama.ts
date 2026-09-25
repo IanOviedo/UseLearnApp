@@ -1,11 +1,11 @@
-export async function extraerSubtemas(texto: string): Promise<string[]> {
+export async function extraerSubtemas(texto: string, modelo: string = "gemma4:26b"): Promise<string[]> {
   const response = await fetch("http://localhost:11434/api/generate", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "gemma4:26b",
+      model: modelo,
       prompt: `Extract the key sub-topics/concepts from the following text. Respond with ONLY a JSON array of short strings, nothing else (example: ["useState básico", "useEffect y dependencias", "props vs state"]).
 
 Text:
@@ -26,14 +26,11 @@ ${texto}`,
 
   const rawText = data.response.trim();
 
-  // Limpieza de fences de markdown (```json ... ``` o ``` ... ```)
   let cleanText = rawText
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/```\s*$/i, "")
     .trim();
 
-  // Si aun así el modelo agregó texto antes/después del array,
-  // extraemos solo la porción entre el primer [ y el último ]
   const firstBracket = cleanText.indexOf("[");
   const lastBracket = cleanText.lastIndexOf("]");
   if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
@@ -60,14 +57,18 @@ export interface Pregunta {
   respuestaCorrecta: string;
 }
 
-export async function generarPregunta(subtema: string, textoOriginal: string): Promise<Pregunta> {
+export async function generarPregunta(
+  subtema: string,
+  textoOriginal: string,
+  modelo: string = "gemma4:26b"
+): Promise<Pregunta> {
   const response = await fetch("http://localhost:11434/api/generate", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "gemma4:26b",
+      model: modelo,
       prompt: `Sos un asistente que genera preguntas de opción múltiple ÚNICAMENTE a partir del siguiente texto de estudio. No uses conocimiento externo ni inventes información que no esté en el texto.
 
 Texto de estudio:
@@ -144,7 +145,8 @@ export interface ResultadoSubtema {
 }
 
 export async function generarFeedbackSondeo(
-  resultados: ResultadoSubtema[]
+  resultados: ResultadoSubtema[],
+  modelo: string = "gemma4:26b"
 ): Promise<string> {
   const resumen = resultados
     .map(
@@ -161,7 +163,7 @@ export async function generarFeedbackSondeo(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "gemma4:26b",
+      model: modelo,
       prompt: `Sos un tutor de React. Un estudiante acaba de terminar un sondeo (quiz de diagnóstico) sobre varios sub-temas. Este es el resultado por sub-tema:
 
 ${resumen}
