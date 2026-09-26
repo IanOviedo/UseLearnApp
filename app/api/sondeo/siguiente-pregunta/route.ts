@@ -6,11 +6,27 @@ import {
   sondeoCompleto,
 } from "@/lib/db";
 import { generarPregunta, generarFeedbackSondeo } from "@/lib/ollama";
+import type { ProveedorNube } from "@/lib/proveedores";
 
 export async function GET(request: NextRequest) {
   const sesionId = Number(request.nextUrl.searchParams.get("sesionId"));
   const modeloPreguntas = request.nextUrl.searchParams.get("modeloPreguntas") ?? undefined;
   const modeloPrincipal = request.nextUrl.searchParams.get("modeloPrincipal") ?? undefined;
+  const proveedorNombre = request.nextUrl.searchParams.get("proveedorNombre") ?? undefined;
+  const proveedorBaseUrl = request.nextUrl.searchParams.get("proveedorBaseUrl") ?? undefined;
+  const proveedorApiKey = request.nextUrl.searchParams.get("proveedorApiKey") ?? undefined;
+  const proveedorFormato = request.nextUrl.searchParams.get("proveedorFormato") ?? undefined;
+
+  const proveedorInfo =
+    proveedorNombre && proveedorBaseUrl && proveedorApiKey && proveedorFormato
+      ? {
+          id: "temp",
+          nombre: proveedorNombre,
+          baseUrl: proveedorBaseUrl,
+          apiKey: proveedorApiKey,
+          formato: proveedorFormato as "openai" | "gemini-nativo",
+        }
+      : undefined;
 
   if (!sesionId) {
     return NextResponse.json(
@@ -48,7 +64,7 @@ if (!sesion) {
         { status: 400 }
       );
     }
-    const pregunta = await generarPregunta(subtema.nombre, sesion.textoOriginal, modeloPreguntas);
+    const pregunta = await generarPregunta(subtema.nombre, sesion.textoOriginal, modeloPreguntas, proveedorInfo);
     return NextResponse.json({
       completo: false,
       subtemaId: subtema.id,
