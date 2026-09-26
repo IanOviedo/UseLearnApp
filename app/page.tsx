@@ -350,6 +350,11 @@ export default function HomePage() {
       {m.nombre}
     </option>
   ))}
+  {proveedores.map((p) => (
+    <option key={p.id} value={p.nombre}>
+      {"✦ " + p.nombre + " (nube)"}
+    </option>
+  ))}
 </select>
               )}
             </div>
