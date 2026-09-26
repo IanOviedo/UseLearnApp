@@ -1,3 +1,5 @@
+import { buscarProveedorPorNombreDeModelo, type ProveedorNube } from "./proveedores"
+
 export async function extraerSubtemas(texto: string, modelo: string = "gemma4:26b"): Promise<string[]> {
   const response = await fetch("http://localhost:11434/api/generate", {
     method: "POST",
@@ -196,6 +198,39 @@ async function generarPreguntaOllama(subtema: string, textoOriginal: string, mod
     );
   }
 }
+
+export async function generarPreguntaOpenAICompat(
+  subtema: string,
+  textoOriginal: string,
+  proveedor: ProveedorNube
+) {
+  const prompt = construirPromptPregunta(subtema, textoOriginal);
+
+  const res = await fetch(`${proveedor.baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${proveedor.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: "llama-3.3-70b-versatile",
+      messages: [{ role: "user", content: prompt }],
+      response_format: { type: "json_object" },
+    }),
+  });
+
+  if (!res.ok) {
+    const textoError = await res.text();
+    throw new Error(
+      `Error de ${proveedor.nombre} (${res.status}): ${textoError}`
+    );
+  }
+
+  const data = await res.json();
+  const contenido = data.choices[0].message.content;
+  return parsearRespuestaPregunta(contenido);
+}
+
 
 export async function generarPregunta(
   subtema: string,
