@@ -44,6 +44,7 @@ export default function HomePage() {
   const [nuevoNombre, setNuevoNombre] = useState("");
   const [nuevaBaseUrl, setNuevaBaseUrl] = useState("");
   const [nuevaApiKey, setNuevaApiKey] = useState("");
+  const [nuevoFormato, setNuevoFormato] = useState<"openai" | "gemini-nativo">("openai");
 
 
   const [sesionesAbiertas, setSesionesAbiertas] = useState(true);
@@ -382,7 +383,10 @@ export default function HomePage() {
                     <div>
                       <input value={nuevoNombre} onChange={(e) => setNuevoNombre(e.target.value)} placeholder="Nombre (ej. Groq)" />
                       <input value={nuevaBaseUrl} onChange={(e) => setNuevaBaseUrl(e.target.value)} placeholder="URL base de la API" />
-                      <input type="password" value={nuevaApiKey} onChange={(e) => setNuevaApiKey(e.target.value)} placeholder="API key" />
+                      <select value={nuevoFormato} onChange={(e) => setNuevoFormato(e.target.value as "openai" | "gemini-nativo")}>
+  <option value="openai">OpenAI-compatible</option>
+  <option value="gemini-nativo">Gemini nativo</option>
+</select>
                     </div>
                   )}
 
