@@ -83,6 +83,12 @@ Reglas:
 - La pregunta debe evaluar comprensión real, no ser trivial.`;
 }
 
+function limpiarOpcion(texto: string): string {
+  return texto
+    .replace(/^(opci[oó]n\s*)?[a-d][.):]\s*/i, "")
+    .trim();
+}
+
 function parsearRespuestaPregunta(rawText: string): Pregunta {
   let cleanText = rawText.trim()
     .replace(/^```(?:json)?\s*/i, "")
@@ -107,6 +113,8 @@ function parsearRespuestaPregunta(rawText: string): Pregunta {
   ) {
     throw new Error(`Estructura inválida: ${JSON.stringify(parsed)}`);
   }
+
+  parsed.opciones = parsed.opciones.map(limpiarOpcion);
 
   return parsed as Pregunta;
 }
