@@ -40,6 +40,8 @@ export default function HomePage() {
   const [modeloPrincipal, setModeloPrincipal] = useState("gemma4:26b");
   const [modeloPreguntas, setModeloPreguntas] = useState("gemma4:26b");
   const [proveedores, setProveedores] = useState<ProveedorNube[]>([]);
+  const [mostrandoFormProveedor, setMostrandoFormProveedor] = useState(false);
+  const [nuevoNombre, setNuevoNombre] = useState("");
 
 
   const [sesionesAbiertas, setSesionesAbiertas] = useState(true);
@@ -373,6 +375,13 @@ export default function HomePage() {
                    ))}
                  </div>
                )}
+                  <button onClick={() => setMostrandoFormProveedor(true)}>+ Agregar proveedor</button>
+                  {mostrandoFormProveedor && (
+                    <div>
+                      <input value={nuevoNombre} onChange={(e) => setNuevoNombre(e.target.value)} placeholder="Nombre (ej. Groq)" />
+                    </div>
+                  )}
+
              </div>
 
           </div>
