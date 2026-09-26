@@ -67,9 +67,21 @@ export default function SondeoPage() {
     try {
       const modeloPreguntas = localStorage.getItem("uselearn:modeloPreguntas") ?? "";
       const modeloPrincipal = localStorage.getItem("uselearn:modeloPrincipal") ?? "";
+      const proveedores: import("@/lib/proveedores").ProveedorNube[] = JSON.parse(
+        localStorage.getItem("proveedoresNube") ?? "[]"
+      );
+      const proveedorSeleccionado = proveedores.find((p) =>
+        modeloPreguntas.toLowerCase().startsWith(p.nombre.toLowerCase())
+      );
       const queryParams = new URLSearchParams({ sesionId: String(sesionId) });
       if (modeloPreguntas) queryParams.set("modeloPreguntas", modeloPreguntas);
       if (modeloPrincipal) queryParams.set("modeloPrincipal", modeloPrincipal);
+      if (proveedorSeleccionado) {
+        queryParams.set("proveedorNombre", proveedorSeleccionado.nombre);
+        queryParams.set("proveedorBaseUrl", proveedorSeleccionado.baseUrl);
+        queryParams.set("proveedorApiKey", proveedorSeleccionado.apiKey);
+        queryParams.set("proveedorFormato", proveedorSeleccionado.formato);
+      }
 
       const res = await fetch(`/api/sondeo/siguiente-pregunta?${queryParams.toString()}`);
       const data: SiguientePreguntaResponse = await res.json();
