@@ -235,8 +235,13 @@ export async function generarPreguntaOpenAICompat(
 export async function generarPregunta(
   subtema: string,
   textoOriginal: string,
-  modelo: string = "gemma4:26b"
+  modelo: string = "gemma4:26b",
+  proveedorInfo?: ProveedorNube
 ): Promise<Pregunta> {
+  if (proveedorInfo) {
+    return generarPreguntaOpenAICompat(subtema, textoOriginal, proveedorInfo);
+  }
+
   const proveedorConfigurado = buscarProveedorPorNombreDeModelo(modelo);
   if (proveedorConfigurado) {
     return generarPreguntaOpenAICompat(subtema, textoOriginal, proveedorConfigurado);
