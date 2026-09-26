@@ -43,6 +43,7 @@ export default function HomePage() {
   const [mostrandoFormProveedor, setMostrandoFormProveedor] = useState(false);
   const [nuevoNombre, setNuevoNombre] = useState("");
   const [nuevaBaseUrl, setNuevaBaseUrl] = useState("");
+  const [nuevaApiKey, setNuevaApiKey] = useState("");
 
 
   const [sesionesAbiertas, setSesionesAbiertas] = useState(true);
@@ -381,6 +382,7 @@ export default function HomePage() {
                     <div>
                       <input value={nuevoNombre} onChange={(e) => setNuevoNombre(e.target.value)} placeholder="Nombre (ej. Groq)" />
                       <input value={nuevaBaseUrl} onChange={(e) => setNuevaBaseUrl(e.target.value)} placeholder="URL base de la API" />
+                      <input type="password" value={nuevaApiKey} onChange={(e) => setNuevaApiKey(e.target.value)} placeholder="API key" />
                     </div>
                   )}
 
