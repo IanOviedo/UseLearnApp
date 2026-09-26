@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { obtenerProveedores, eliminarProveedor, type ProveedorNube } from "@/lib/proveedores";
 
 
 type EstadoQuiz = "idle" | "generando" | "listo";
@@ -38,6 +39,7 @@ export default function HomePage() {
   const [cargandoModelos, setCargandoModelos] = useState(false);
   const [modeloPrincipal, setModeloPrincipal] = useState("gemma4:26b");
   const [modeloPreguntas, setModeloPreguntas] = useState("gemma4:26b");
+  const [proveedores, setProveedores] = useState<ProveedorNube[]>([]);
 
 
   const [sesionesAbiertas, setSesionesAbiertas] = useState(true);
@@ -52,6 +54,7 @@ export default function HomePage() {
 
   async function abrirAjustes() {
     setAjustesModalAbierto(true);
+    setProveedores(obtenerProveedores());
     setCargandoModelos(true);
     try {
       const res = await fetch("/api/modelos/listar");
@@ -331,19 +334,47 @@ export default function HomePage() {
                   No se pudo conectar con Ollama en localhost:11434.
                 </p>
               ) : (
-                <select
-                  value={modeloPreguntas}
-                  onChange={(e) => guardarModeloPreguntas(e.target.value)}
-                  className="w-full rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm"
-                >
-                  {modelosDisponibles.map((m) => (
-                    <option key={m.nombre} value={m.nombre}>
-                      {m.nombre}
-                    </option>
-                  ))}
-                </select>
+<select
+  value={modeloPreguntas}
+  onChange={(e) => guardarModeloPreguntas(e.target.value)}
+  className="w-full rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm"
+>
+  <option value="gemini-flash-latest">✦ Gemini (nube) — gemini-flash-latest</option>
+  {modelosDisponibles.map((m) => (
+    <option key={m.nombre} value={m.nombre}>
+      {m.nombre}
+    </option>
+  ))}
+</select>
               )}
             </div>
+             <div className="mt-6">
+               <h3 className="text-sm font-medium text-neutral-200 mb-2">Proveedores de nube configurados</h3>
+               {proveedores.length === 0 ? (
+                 <p className="text-xs text-neutral-500">No hay proveedores configurados</p>
+               ) : (
+                 <div className="space-y-2">
+                   {proveedores.map((p) => (
+                     <div key={p.id} className="flex items-center justify-between rounded-lg bg-neutral-900 p-2 text-xs border border-neutral-800">
+                       <div className="flex flex-col">
+                         <span className="text-neutral-200">{p.nombre}</span>
+                         <span className="text-neutral-500">{`••••••${p.apiKey.slice(-4)}`}</span>
+                       </div>
+                       <button
+                         onClick={() => {
+                           eliminarProveedor(p.id);
+                           setProveedores(obtenerProveedores());
+                         }}
+                         className="text-red-400 hover:text-red-300 transition-colors"
+                       >
+                         Eliminar
+                       </button>
+                     </div>
+                   ))}
+                 </div>
+               )}
+             </div>
+
           </div>
         </div>
       )}

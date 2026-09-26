@@ -6,7 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 interface Pregunta {
   pregunta: string;
   opciones: string[];
-  respuestaCorrecta: string;
+  indiceCorrecta: number;
 }
 
 interface SiguientePreguntaResponse {
@@ -32,6 +32,21 @@ function barajar<T>(array: T[]): T[] {
   return copia;
 }
 
+function barajarPregunta(pregunta: Pregunta): Pregunta {
+  const opcionesConFlag = pregunta.opciones.map((texto, i) => ({
+    texto,
+    esCorrecta: i === pregunta.indiceCorrecta,
+  }));
+  const barajadas = barajar(opcionesConFlag);
+  const nuevoIndice = barajadas.findIndex((o) => o.esCorrecta);
+
+  return {
+    ...pregunta,
+    opciones: barajadas.map((o) => o.texto),
+    indiceCorrecta: nuevoIndice,
+  };
+}
+
 export default function SondeoPage() {
   const params = useParams();
   const router = useRouter();
@@ -52,11 +67,11 @@ export default function SondeoPage() {
     try {
       const modeloPreguntas = localStorage.getItem("uselearn:modeloPreguntas") ?? "";
       const modeloPrincipal = localStorage.getItem("uselearn:modeloPrincipal") ?? "";
-      const params = new URLSearchParams({ sesionId: String(sesionId) });
-      if (modeloPreguntas) params.set("modeloPreguntas", modeloPreguntas);
-      if (modeloPrincipal) params.set("modeloPrincipal", modeloPrincipal);
+      const queryParams = new URLSearchParams({ sesionId: String(sesionId) });
+      if (modeloPreguntas) queryParams.set("modeloPreguntas", modeloPreguntas);
+      if (modeloPrincipal) queryParams.set("modeloPrincipal", modeloPrincipal);
 
-      const res = await fetch(`/api/sondeo/siguiente-pregunta?${params.toString()}`);
+      const res = await fetch(`/api/sondeo/siguiente-pregunta?${queryParams.toString()}`);
       const data: SiguientePreguntaResponse = await res.json();
 
       if (data.error) {
@@ -67,17 +82,13 @@ export default function SondeoPage() {
       if (data.completo) {
         setCompleto(true);
         setFeedback(data.feedback ?? "");
-            } else if (data.pregunta && data.subtemaId) {
-        const preguntaConOpcionesBarajadas: Pregunta = {
-          ...data.pregunta,
-          opciones: barajar(data.pregunta.opciones),
-        };
+      } else if (data.pregunta && data.subtemaId) {
+        const preguntaConOpcionesBarajadas = barajarPregunta(data.pregunta);
         setHistorial((prev) => [
           ...prev,
           { subtemaId: data.subtemaId!, pregunta: preguntaConOpcionesBarajadas, opcionElegida: null },
         ]);
       }
-      
     } catch {
       setError("No se pudo conectar con el servidor.");
     } finally {
@@ -91,7 +102,6 @@ export default function SondeoPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sesionId]);
 
-  // Auto-scroll cada vez que se agrega una pregunta nueva o se llega al feedback final
   useEffect(() => {
     finRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [historial.length, completo]);
@@ -107,7 +117,7 @@ export default function SondeoPage() {
   async function responderYAvanzar(index: number) {
     const item = historial[index];
     if (!item.opcionElegida) return;
-    const correcta = item.opcionElegida === item.pregunta.respuestaCorrecta;
+    const correcta = item.opcionElegida === item.pregunta.opciones[item.pregunta.indiceCorrecta];
     try {
       await fetch("/api/sondeo/responder", {
         method: "POST",
@@ -161,7 +171,7 @@ export default function SondeoPage() {
               <div className="flex flex-col gap-3">
                 {item.pregunta.opciones.map((opcion) => {
                   const esElegida = item.opcionElegida === opcion;
-                  const esCorrecta = opcion === item.pregunta.respuestaCorrecta;
+                  const esCorrecta = opcion === item.pregunta.opciones[item.pregunta.indiceCorrecta];
                   let estilos = "border-neutral-700 hover:border-neutral-500";
 
                   if (respondida) {
