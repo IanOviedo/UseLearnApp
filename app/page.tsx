@@ -42,6 +42,7 @@ export default function HomePage() {
   const [proveedores, setProveedores] = useState<ProveedorNube[]>([]);
   const [mostrandoFormProveedor, setMostrandoFormProveedor] = useState(false);
   const [nuevoNombre, setNuevoNombre] = useState("");
+  const [nuevaBaseUrl, setNuevaBaseUrl] = useState("");
 
 
   const [sesionesAbiertas, setSesionesAbiertas] = useState(true);
@@ -379,6 +380,7 @@ export default function HomePage() {
                   {mostrandoFormProveedor && (
                     <div>
                       <input value={nuevoNombre} onChange={(e) => setNuevoNombre(e.target.value)} placeholder="Nombre (ej. Groq)" />
+                      <input value={nuevaBaseUrl} onChange={(e) => setNuevaBaseUrl(e.target.value)} placeholder="URL base de la API" />
                     </div>
                   )}
 
