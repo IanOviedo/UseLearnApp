@@ -237,6 +237,11 @@ export async function generarPregunta(
   textoOriginal: string,
   modelo: string = "gemma4:26b"
 ): Promise<Pregunta> {
+  const proveedorConfigurado = buscarProveedorPorNombreDeModelo(modelo);
+  if (proveedorConfigurado) {
+    return generarPreguntaOpenAICompat(subtema, textoOriginal, proveedorConfigurado);
+  }
+
   if (modelo.startsWith("gemini")) {
     return generarPreguntaGemini(subtema, textoOriginal);
   }
