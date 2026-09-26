@@ -57,7 +57,7 @@ export interface Pregunta {
   indiceCorrecta: number;
 }
 
-function construirPromptPregunta(subtema: string, textoOriginal: string): string {
+function construirPromptPregunta(subtema: string, textoOriginal: string, preguntasPrevias: string[] = []): string {
   return `Sos un asistente que genera preguntas de opción múltiple ÚNICAMENTE a partir del siguiente texto de estudio. No uses conocimiento externo ni inventes información que no esté en el texto.
 
 Texto de estudio:
@@ -67,7 +67,7 @@ ${textoOriginal}
 
 Generá UNA pregunta de opción múltiple sobre el sub-tema "${subtema}", basada estrictamente en el contenido del texto de arriba.
 
-Antes de responder, pensá paso a paso (en texto plano, sin llaves { }):
+Anterior a responder, pensá paso a paso (en texto plano, sin llaves { }):
 1. Redactá las 4 opciones.
 2. Para cada opción, decidí explícitamente si es verdadera o falsa según el texto, y por qué.
 3. Si la pregunta compara dos cosas (por ejemplo React vs Vanilla JavaScript, o dos conceptos distintos), revisá con cuidado a cuál de los dos le corresponde cada característica antes de decidir — es un error común confundir cuál de los dos hace qué.
@@ -76,8 +76,11 @@ Antes de responder, pensá paso a paso (en texto plano, sin llaves { }):
 Después de ese razonamiento en texto plano, en una línea aparte escribí exactamente "RESPUESTA:" seguido ÚNICAMENTE del objeto JSON con esta forma exacta, nada más:
 {"pregunta": "texto de la pregunta", "opciones": ["opción A", "opción B", "opción C", "opción D"], "indiceCorrecta": 0}
 
-Reglas:
+${bloqueHistorial}Reglas:
 - La pregunta y todas las opciones deben basarse solo en lo que dice el texto de estudio, no en conocimiento general de React.
+- Exactamente 4 opciones.
+- "indiceCorrecta" debe ser un número entero de 0 a 3, correspondiente a tu propio razonamiento del paso 4.
+- La pregunta debe evaluar comprensión real, no ser trivial.`;
 - Exactamente 4 opciones.
 - "indiceCorrecta" debe ser un número entero de 0 a 3, correspondiente a tu propio razonamiento del paso 4.
 - La pregunta debe evaluar comprensión real, no ser trivial.`;
