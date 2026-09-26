@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { obtenerProveedores, eliminarProveedor, type ProveedorNube } from "@/lib/proveedores";
+import { obtenerProveedores, eliminarProveedor, agregarProveedor, type ProveedorNube } from "@/lib/proveedores";
 
 
 type EstadoQuiz = "idle" | "generando" | "listo";
@@ -380,13 +380,57 @@ export default function HomePage() {
                )}
                   <button onClick={() => setMostrandoFormProveedor(true)}>+ Agregar proveedor</button>
                   {mostrandoFormProveedor && (
-                    <div>
-                      <input value={nuevoNombre} onChange={(e) => setNuevoNombre(e.target.value)} placeholder="Nombre (ej. Groq)" />
-                      <input value={nuevaBaseUrl} onChange={(e) => setNuevaBaseUrl(e.target.value)} placeholder="URL base de la API" />
-                      <select value={nuevoFormato} onChange={(e) => setNuevoFormato(e.target.value as "openai" | "gemini-nativo")}>
-  <option value="openai">OpenAI-compatible</option>
-  <option value="gemini-nativo">Gemini nativo</option>
-</select>
+                    <div className="mt-2 flex flex-col gap-2">
+                      <input
+                        className="rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 placeholder-neutral-500"
+                        value={nuevoNombre}
+                        onChange={(e) => setNuevoNombre(e.target.value)}
+                        placeholder="Nombre (ej. Groq)"
+                      />
+                      <input
+                        className="rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 placeholder-neutral-500"
+                        value={nuevaBaseUrl}
+                        onChange={(e) => setNuevaBaseUrl(e.target.value)}
+                        placeholder="URL base de la API"
+                      />
+                      <input
+                        className="rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 placeholder-neutral-500"
+                        value={nuevaApiKey}
+                        onChange={(e) => setNuevaApiKey(e.target.value)}
+                        placeholder="API Key"
+                      />
+                      <select
+                        className="rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 placeholder-neutral-500"
+                        value={nuevoFormato}
+                        onChange={(e) => setNuevoFormato(e.target.value as "openai" | "gemini-nativo")}
+                      >
+                        <option value="openai">OpenAI-compatible</option>
+                        <option value="gemini-nativo">Gemini nativo</option>
+                      </select>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            if (!nuevoNombre || !nuevaBaseUrl || !nuevaApiKey) return;
+                            agregarProveedor({
+                              nombre: nuevoNombre,
+                              baseUrl: nuevaBaseUrl,
+                              apiKey: nuevaApiKey,
+                              formato: nuevoFormato,
+                            });
+                            setProveedores(obtenerProveedores());
+                            setNuevoNombre("");
+                            setNuevaBaseUrl("");
+                            setNuevaApiKey("");
+                            setNuevoFormato("openai");
+                            setMostrandoFormProveedor(false);
+                          }}
+                        >
+                          Guardar
+                        </button>
+                        <button onClick={() => setMostrandoFormProveedor(false)}>
+                          Cancelar
+                        </button>
+                      </div>
                     </div>
                   )}
 
