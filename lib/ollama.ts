@@ -213,7 +213,7 @@ export async function generarPreguntaOpenAICompat(
       "Authorization": `Bearer ${proveedor.apiKey}`,
     },
     body: JSON.stringify({
-      model: "llama-3.3-70b-versatile",
+      model: "openai/gpt-oss-120b",
       messages: [{ role: "user", content: prompt }],
       response_format: { type: "json_object" },
     }),
