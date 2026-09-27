@@ -4,10 +4,10 @@ import {
   obtenerSubtemas,
   obtenerSesion,
   sondeoCompleto,
-  obtenerPreguntasPrevias,
+  obtenerPreguntasSinResponder,
   guardarPregunta,
 } from "@/lib/db";
-import { generarPregunta, generarFeedbackSondeo } from "@/lib/ollama";
+import { generarPregunta, generarLotePreguntas, generarFeedbackSondeo } from "@/lib/ollama";
 import type { ProveedorNube } from "@/lib/proveedores";
 
 export async function GET(request: NextRequest) {
@@ -66,13 +66,29 @@ if (!sesion) {
         { status: 400 }
       );
     }
-    const preguntasPrevias = obtenerPreguntasPrevias(sesionId);
-    const pregunta = await generarPregunta(subtema.nombre, sesion.textoOriginal, modeloPreguntas, proveedorInfo, preguntasPrevias);
-    guardarPregunta(sesionId, subtema.id, "sondeo", JSON.stringify(pregunta), "multiple_choice");
+    const pendientes = obtenerPreguntasSinResponder(subtema.id);
+
+    if (pendientes.length > 0) {
+      const siguiente = pendientes[0];
+      return NextResponse.json({
+        completo: false,
+        subtemaId: subtema.id,
+        preguntaId: siguiente.id,
+        pregunta: JSON.parse(siguiente.contenido),
+      });
+    }
+
+    const lote = await generarLotePreguntas(subtema.nombre, sesion.textoOriginal, modeloPreguntas, proveedorInfo);
+
+    const idsGuardados = lote.map((p) =>
+      guardarPregunta(sesionId, subtema.id, "sondeo", JSON.stringify(p), "multiple_choice")
+    );
+
     return NextResponse.json({
       completo: false,
       subtemaId: subtema.id,
-      pregunta,
+      preguntaId: idsGuardados[0],
+      pregunta: lote[0],
     });
   } catch (error) {
     console.error("Error en siguiente-pregunta:", error);
