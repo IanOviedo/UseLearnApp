@@ -57,7 +57,15 @@ export interface Pregunta {
   indiceCorrecta: number;
 }
 
-function construirPromptPregunta(subtema: string, textoOriginal: string, preguntasPrevias: string[] = []): string {
+function construirPromptPregunta(
+  subtema: string,
+  textoOriginal: string,
+  preguntasPrevias: string[] = []
+): string {
+  const bloqueHistorial = preguntasPrevias.length > 0
+    ? `\nPreguntas ya generadas para este subtema en esta sesión (NO las repitas ni las reformules — generá una que explore un aspecto, ejemplo o ángulo distinto del concepto):\n${preguntasPrevias.map((p, i) => `${i + 1}. ${p}`).join("\n")}\n`
+    : "";
+  console.log(`[construirPromptPregunta] subtema="${subtema}" preguntasPrevias=${preguntasPrevias.length}`);
   return `Sos un asistente que genera preguntas de opción múltiple ÚNICAMENTE a partir del siguiente texto de estudio. No uses conocimiento externo ni inventes información que no esté en el texto.
 
 Texto de estudio:
@@ -78,9 +86,6 @@ Después de ese razonamiento en texto plano, en una línea aparte escribí exact
 
 ${bloqueHistorial}Reglas:
 - La pregunta y todas las opciones deben basarse solo en lo que dice el texto de estudio, no en conocimiento general de React.
-- Exactamente 4 opciones.
-- "indiceCorrecta" debe ser un número entero de 0 a 3, correspondiente a tu propio razonamiento del paso 4.
-- La pregunta debe evaluar comprensión real, no ser trivial.`;
 - Exactamente 4 opciones.
 - "indiceCorrecta" debe ser un número entero de 0 a 3, correspondiente a tu propio razonamiento del paso 4.
 - La pregunta debe evaluar comprensión real, no ser trivial.`;
@@ -142,8 +147,12 @@ async function fetchGeminiConReintento(url: string, body: string): Promise<Respo
   return primero;
 }
 
-async function generarPreguntaGemini(subtema: string, textoOriginal: string): Promise<Pregunta> {
-  const prompt = construirPromptPregunta(subtema, textoOriginal);
+async function generarPreguntaGemini(
+  subtema: string,
+  textoOriginal: string,
+  preguntasPrevias: string[] = []
+): Promise<Pregunta> {
+  const prompt = construirPromptPregunta(subtema, textoOriginal, preguntasPrevias);
 
   const response = await fetchGeminiConReintento(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${process.env.GEMINI_API_KEY}`,
@@ -155,7 +164,9 @@ async function generarPreguntaGemini(subtema: string, textoOriginal: string): Pr
 
   if (!response.ok) {
     if (response.status === 429) {
-      throw new Error("Se alcanzó el límite de uso gratuito de Gemini por hoy. Probá con un modelo local, o esperá a mañana.");
+      throw new Error(
+        "Se alcanzó el límite de uso gratuito de Gemini por hoy. Probá con un modelo local, o esperá a mañana."
+      );
     }
     throw new Error(`Gemini API error: ${response.statusText}`);
   }
@@ -177,8 +188,13 @@ async function generarPreguntaGemini(subtema: string, textoOriginal: string): Pr
   }
 }
 
-async function generarPreguntaOllama(subtema: string, textoOriginal: string, modelo: string): Promise<Pregunta> {
-  const prompt = construirPromptPregunta(subtema, textoOriginal);
+async function generarPreguntaOllama(
+  subtema: string,
+  textoOriginal: string,
+  modelo: string,
+  preguntasPrevias: string[] = []
+): Promise<Pregunta> {
+  const prompt = construirPromptPregunta(subtema, textoOriginal, preguntasPrevias);
 
   const response = await fetch("http://localhost:11434/api/generate", {
     method: "POST",
@@ -213,15 +229,16 @@ async function generarPreguntaOllama(subtema: string, textoOriginal: string, mod
 export async function generarPreguntaOpenAICompat(
   subtema: string,
   textoOriginal: string,
-  proveedor: ProveedorNube
-) {
-  const prompt = construirPromptPregunta(subtema, textoOriginal);
+  proveedor: ProveedorNube,
+  preguntasPrevias: string[] = []
+): Promise<Pregunta> {
+  const prompt = construirPromptPregunta(subtema, textoOriginal, preguntasPrevias);
 
   const res = await fetch(`${proveedor.baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${proveedor.apiKey}`,
+      Authorization: `Bearer ${proveedor.apiKey}`,
     },
     body: JSON.stringify({
       model: "openai/gpt-oss-120b",
@@ -247,21 +264,22 @@ export async function generarPregunta(
   subtema: string,
   textoOriginal: string,
   modelo: string = "gemma4:26b",
-  proveedorInfo?: ProveedorNube
+  proveedorInfo?: ProveedorNube,
+  preguntasPrevias: string[] = []
 ): Promise<Pregunta> {
   if (proveedorInfo) {
-    return generarPreguntaOpenAICompat(subtema, textoOriginal, proveedorInfo);
+    return generarPreguntaOpenAICompat(subtema, textoOriginal, proveedorInfo, preguntasPrevias);
   }
 
   const proveedorConfigurado = buscarProveedorPorNombreDeModelo(modelo);
   if (proveedorConfigurado) {
-    return generarPreguntaOpenAICompat(subtema, textoOriginal, proveedorConfigurado);
+    return generarPreguntaOpenAICompat(subtema, textoOriginal, proveedorConfigurado, preguntasPrevias);
   }
 
   if (modelo.startsWith("gemini")) {
-    return generarPreguntaGemini(subtema, textoOriginal);
+    return generarPreguntaGemini(subtema, textoOriginal, preguntasPrevias);
   }
-  return generarPreguntaOllama(subtema, textoOriginal, modelo);
+  return generarPreguntaOllama(subtema, textoOriginal, modelo, preguntasPrevias);
 }
 
 export interface ResultadoSubtema {
@@ -278,9 +296,7 @@ export async function generarFeedbackSondeo(
   const resumen = resultados
     .map(
       (r) =>
-        `- ${r.nombre}: ${r.correctas} correctas, ${r.incorrectas} incorrectas${
-          r.cubierto ? " (dominado)" : " (débil)"
-        }`
+        `- ${r.nombre}: ${r.correctas} correctas, ${r.incorrectas} incorrectas${r.cubierto ? " (dominado)" : " (débil)"}`
     )
     .join("\n");
 
