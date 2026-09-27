@@ -128,7 +128,26 @@ function sondeoCompleto(sesionId: number): boolean {
   }
   return subtemas.every(subtema => subtema.cubierto);
 }
+function guardarPregunta(sesionId: number, subtemaId: number, fase: string, contenido: string, tipo: string): void {
+  db.prepare("INSERT INTO preguntas (sesion_id, subtema_id, fase, contenido, tipo) VALUES (?, ?, ?, ?, ?)")
+    .run(sesionId, subtemaId, fase, contenido, tipo);
+}
+
+function obtenerPreguntasPrevias(sesionId: number, subtemaId: number): string[] {
+  const rows = db.prepare("SELECT contenido FROM preguntas WHERE sesion_id = ? AND subtema_id = ?")
+    .all(sesionId, subtemaId) as { contenido: string }[];
+
+  return rows.map(row => {
+    try {
+      const parsed = JSON.parse(row.contenido);
+      return typeof parsed.pregunta === "string" ? parsed.pregunta : "";
+    } catch {
+      return "";
+    }
+  }).filter(texto => texto.length > 0);
+}
+
 
 export default db;
-export { crearSesion, agregarSubtema, obtenerSubtemas, actualizarAciertos, obtenerSesion, elegirSiguienteSubtema, sondeoCompleto }; 
+export { crearSesion, agregarSubtema, obtenerSubtemas, actualizarAciertos, obtenerSesion, elegirSiguienteSubtema, sondeoCompleto, guardarPregunta, obtenerPreguntasPrevias };
 
