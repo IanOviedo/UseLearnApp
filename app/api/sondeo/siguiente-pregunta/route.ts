@@ -4,6 +4,8 @@ import {
   obtenerSubtemas,
   obtenerSesion,
   sondeoCompleto,
+  obtenerPreguntasPrevias,
+  guardarPregunta,
 } from "@/lib/db";
 import { generarPregunta, generarFeedbackSondeo } from "@/lib/ollama";
 import type { ProveedorNube } from "@/lib/proveedores";
@@ -64,7 +66,9 @@ if (!sesion) {
         { status: 400 }
       );
     }
-    const pregunta = await generarPregunta(subtema.nombre, sesion.textoOriginal, modeloPreguntas, proveedorInfo);
+    const preguntasPrevias = obtenerPreguntasPrevias(sesionId, subtema.id);
+    const pregunta = await generarPregunta(subtema.nombre, sesion.textoOriginal, modeloPreguntas, proveedorInfo, preguntasPrevias);
+    guardarPregunta(sesionId, subtema.id, "sondeo", JSON.stringify(pregunta), "multiple_choice");
     return NextResponse.json({
       completo: false,
       subtemaId: subtema.id,
