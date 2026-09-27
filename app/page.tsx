@@ -207,16 +207,17 @@ export default function HomePage() {
         <div className="absolute -left-32 top-1/3 h-96 w-96 rounded-full bg-indigo-500/10 blur-3xl animate-blob-slow" />
         <div className="absolute -right-24 top-10 h-80 w-80 rounded-full bg-sky-500/10 blur-3xl animate-blob-slower" />
         <div className="absolute left-1/3 bottom-0 h-72 w-72 rounded-full bg-violet-500/10 blur-3xl animate-blob-slow" />
+        <div className="absolute inset-0 bg-[radial-gradient(rgba(255,255,255,0.05)_1px,transparent_1px)] [background-size:26px_26px] [mask-image:radial-gradient(ellipse_at_top,black,transparent_75%)]" />
       </div>
 
       {/* Header */}
-      <header className="relative z-10 flex items-center justify-between px-8 py-4 border-b border-neutral-900">
-        <span className="text-sm font-semibold tracking-widest">USELEARN</span>
+      <header className="relative z-10 flex items-center justify-between px-8 py-4 border-b border-white/5">
+        <span className="text-sm font-semibold tracking-[0.25em] text-neutral-200">USELEARN</span>
         <div className="flex items-center gap-3 relative">
 
           <button
             onClick={abrirAjustes}
-            className="rounded-full border border-neutral-800 bg-neutral-900 h-8 w-8 flex items-center justify-center text-neutral-400"
+            className="rounded-full border border-neutral-800 bg-neutral-900 h-8 w-8 flex items-center justify-center text-neutral-400 transition-all duration-300 hover:border-neutral-600 hover:text-neutral-200 hover:rotate-45"
           >
             ⚙
           </button>
@@ -225,9 +226,9 @@ export default function HomePage() {
 
       {/* Body */}
       <main className="relative z-10 max-w-5xl mx-auto px-8 py-12">
-        <p className="text-xs tracking-widest text-neutral-500 mb-2">— TU CAMINO DE APRENDIZAJE</p>
-        <h1 className="text-4xl font-bold mb-3">Bienvenido de nuevo</h1>
-        <p className="text-neutral-400 mb-10">
+        <p className="animate-fade-in-up text-xs uppercase tracking-[0.25em] text-neutral-600 mb-3">— TU CAMINO DE APRENDIZAJE</p>
+        <h1 className="animate-fade-in-up [animation-delay:70ms] text-4xl font-bold tracking-tight mb-3 bg-gradient-to-br from-white via-neutral-200 to-neutral-500 bg-clip-text text-transparent">Bienvenido de nuevo</h1>
+        <p className="animate-fade-in-up [animation-delay:140ms] text-neutral-400 leading-relaxed mb-10">
           Aquí es donde comienzas, exploras y practicas.
           <br />
           La IA te guía, tú controlas el ritmo.
@@ -235,7 +236,7 @@ export default function HomePage() {
 
         <div className="grid grid-cols-3 gap-6">
           {/* Textarea */}
-          <div className="col-span-2 rounded-xl border border-neutral-800 bg-neutral-900/50 p-6 flex flex-col min-h-[320px]">
+          <div className="col-span-2 rounded-2xl border border-white/[0.06] bg-neutral-900/40 p-6 flex flex-col min-h-[320px] shadow-[0_24px_48px_-24px_rgba(0,0,0,0.8)]">
             <div className="flex items-center gap-2 text-neutral-300 mb-4">
               <span>📄</span>
               <span className="font-medium">Pega tus notas o lo que sea...</span>
@@ -251,12 +252,12 @@ export default function HomePage() {
               <button
                 onClick={() => setTexto("")}
                 disabled={estadoQuiz === "generando"}
-                className="flex items-center gap-2 rounded-full border border-neutral-700 px-4 py-1.5 text-sm text-neutral-300 hover:border-neutral-500 disabled:opacity-40"
+                className="flex items-center gap-2 rounded-full border border-neutral-800 px-4 py-1.5 text-sm text-neutral-400 transition-all duration-300 hover:border-neutral-600 hover:text-neutral-200 disabled:opacity-40"
               >
                 ⤢ Limpiar texto
               </button>
               <label
-                className={`flex items-center justify-center h-8 w-8 rounded-full border border-neutral-700 text-neutral-300 hover:border-neutral-500 cursor-pointer ${
+                className={`flex items-center justify-center h-8 w-8 rounded-full border border-neutral-800 text-neutral-400 transition-all duration-300 hover:border-neutral-600 hover:text-neutral-200 cursor-pointer ${
                   subiendoArchivo || estadoQuiz === "generando" ? "opacity-40 pointer-events-none" : ""
                 }`}
               >
@@ -276,7 +277,7 @@ export default function HomePage() {
           </div>
 
           {/* Quiz — copy dinámico según estadoQuiz */}
-          <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-6 flex flex-col">
+          <div className="rounded-2xl border border-white/[0.06] bg-neutral-900/40 p-6 flex flex-col shadow-[0_24px_48px_-24px_rgba(0,0,0,0.8)]">
             <div className="flex items-center gap-2 mb-1">
               <span>✦</span>
               <span className="font-semibold">{COPY_POR_ESTADO[estadoQuiz].titulo}</span>
@@ -286,10 +287,10 @@ export default function HomePage() {
             <button
               onClick={estadoQuiz === "listo" ? pasarAlSondeo : generarQuiz}
               disabled={!texto.trim() || estadoQuiz === "generando"}
-              className={`flex items-center justify-between rounded-full px-5 py-3 font-medium transition-colors ${
+              className={`flex items-center justify-between rounded-full px-5 py-3 font-medium transition-all duration-300 ${
                 estadoQuiz === "generando"
-                  ? "bg-neutral-800 text-neutral-500 cursor-not-allowed"
-                  : "bg-neutral-100 text-neutral-900 disabled:opacity-40 disabled:cursor-not-allowed"
+                  ? "bg-neutral-800/70 text-neutral-500 cursor-not-allowed"
+                  : "bg-neutral-100 text-neutral-900 hover:bg-white hover:shadow-lg hover:-translate-y-0.5 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none"
               }`}
             >
               <span className="flex items-center gap-2">
@@ -300,16 +301,16 @@ export default function HomePage() {
               {estadoQuiz !== "generando" && <span className="ml-2">→</span>}
             </button>
 
-            {error && <p className="text-red-500 text-xs mt-3">{error}</p>}
+            {error && <p className="text-red-400 text-xs mt-3">{error}</p>}
           </div>
         </div>
 
         {/* Sesiones pasadas */}
         <button
           onClick={abrirSesiones}
-          className="mt-6 w-full rounded-xl border border-neutral-800 bg-neutral-900/50 p-6 flex items-center gap-3 text-neutral-400 text-left"
+          className="group mt-6 w-full rounded-2xl border border-white/[0.06] bg-neutral-900/40 p-6 flex items-center gap-3 text-neutral-400 text-left transition-all duration-300 hover:border-white/10 hover:bg-neutral-900/70 shadow-[0_24px_48px_-24px_rgba(0,0,0,0.8)]"
         >
-          <span className="text-xl">🕓</span>
+          <span className="text-xl transition-transform duration-300 group-hover:scale-110">🕓</span>
           <span className="font-medium text-neutral-200">Sesiones pasadas</span>
         </button>
       </main>
@@ -317,18 +318,18 @@ export default function HomePage() {
       {/* Modal de Ajustes */}
       {ajustesModalAbierto && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in"
           onClick={() => setAjustesModalAbierto(false)}
         >
           <div
-            className="w-full max-w-lg rounded-xl border border-neutral-800 bg-neutral-950 p-6 max-h-[80vh] overflow-y-auto"
+            className="animate-modal-in w-full max-w-lg rounded-2xl border border-white/10 bg-neutral-950/95 backdrop-blur-xl p-6 max-h-[80vh] overflow-y-auto shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-lg font-semibold">Ajustes</h2>
+              <h2 className="text-lg font-semibold tracking-tight">Ajustes</h2>
               <button
                 onClick={() => setAjustesModalAbierto(false)}
-                className="text-neutral-500 hover:text-neutral-300 text-xl leading-none"
+                className="text-neutral-500 hover:text-neutral-200 text-xl leading-none w-8 h-8 flex items-center justify-center rounded-full transition-colors hover:bg-white/5"
               >
                 ×
               </button>
@@ -351,7 +352,7 @@ export default function HomePage() {
                 <select
                   value={modeloPrincipal}
                   onChange={(e) => guardarModeloPrincipal(e.target.value)}
-                  className="w-full rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm"
+                  className="w-full rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 transition-colors focus:border-neutral-600 focus:outline-none"
                 >
                   {modelosDisponibles.map((m) => (
                     <option key={m.nombre} value={m.nombre}>
@@ -379,7 +380,7 @@ export default function HomePage() {
 <select
   value={modeloPreguntas}
   onChange={(e) => guardarModeloPreguntas(e.target.value)}
-  className="w-full rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm"
+  className="w-full rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 transition-colors focus:border-neutral-600 focus:outline-none"
 >
   <option value="gemini-flash-latest">✦ Gemini (nube) — gemini-flash-latest</option>
   {modelosDisponibles.map((m) => (
@@ -396,13 +397,13 @@ export default function HomePage() {
               )}
             </div>
              <div className="mt-6">
-               <h3 className="text-sm font-medium text-neutral-200 mb-2">Proveedores de nube configurados</h3>
+               <h3 className="text-sm font-medium text-neutral-200 tracking-tight mb-2">Proveedores de nube configurados</h3>
                {proveedores.length === 0 ? (
                  <p className="text-xs text-neutral-500">No hay proveedores configurados</p>
                ) : (
                  <div className="space-y-2">
                    {proveedores.map((p) => (
-                     <div key={p.id} className="flex items-center justify-between rounded-lg bg-neutral-900 p-2 text-xs border border-neutral-800">
+                     <div key={p.id} className="flex items-center justify-between rounded-xl bg-neutral-900/60 p-2.5 text-xs border border-neutral-900 transition-colors hover:border-neutral-800">
                        <div className="flex flex-col">
                          <span className="text-neutral-200">{p.nombre}</span>
                          <span className="text-neutral-500">{`••••••${p.apiKey.slice(-4)}`}</span>
@@ -420,29 +421,29 @@ export default function HomePage() {
                    ))}
                  </div>
                )}
-                  <button onClick={() => setMostrandoFormProveedor(true)}>+ Agregar proveedor</button>
+                  <button onClick={() => setMostrandoFormProveedor(true)} className="mt-3 self-start rounded-full border border-neutral-800 px-4 py-1.5 text-xs text-neutral-300 transition-all duration-300 hover:border-neutral-600 hover:text-neutral-200">+ Agregar proveedor</button>
                   {mostrandoFormProveedor && (
                     <div className="mt-2 flex flex-col gap-2">
                       <input
-                        className="rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 placeholder-neutral-500"
+                        className="rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 placeholder-neutral-500 transition-colors focus:border-neutral-600 focus:outline-none"
                         value={nuevoNombre}
                         onChange={(e) => setNuevoNombre(e.target.value)}
                         placeholder="Nombre (ej. Groq)"
                       />
                       <input
-                        className="rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 placeholder-neutral-500"
+                        className="rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 placeholder-neutral-500 transition-colors focus:border-neutral-600 focus:outline-none"
                         value={nuevaBaseUrl}
                         onChange={(e) => setNuevaBaseUrl(e.target.value)}
                         placeholder="URL base de la API"
                       />
                       <input
-                        className="rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 placeholder-neutral-500"
+                        className="rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 placeholder-neutral-500 transition-colors focus:border-neutral-600 focus:outline-none"
                         value={nuevaApiKey}
                         onChange={(e) => setNuevaApiKey(e.target.value)}
                         placeholder="API Key"
                       />
                       <select
-                        className="rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 placeholder-neutral-500"
+                        className="rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 placeholder-neutral-500 transition-colors focus:border-neutral-600 focus:outline-none"
                         value={nuevoFormato}
                         onChange={(e) => setNuevoFormato(e.target.value as "openai" | "gemini-nativo")}
                       >
@@ -451,6 +452,7 @@ export default function HomePage() {
                       </select>
                       <div className="flex gap-2">
                         <button
+                          className="rounded-full bg-neutral-100 text-neutral-900 px-4 py-1.5 text-xs font-medium transition-all duration-300 hover:bg-white hover:shadow-md"
                           onClick={() => {
                             if (!nuevoNombre || !nuevaBaseUrl || !nuevaApiKey) return;
                             agregarProveedor({
@@ -469,7 +471,7 @@ export default function HomePage() {
                         >
                           Guardar
                         </button>
-                        <button onClick={() => setMostrandoFormProveedor(false)}>
+                        <button onClick={() => setMostrandoFormProveedor(false)} className="rounded-full border border-neutral-800 px-4 py-1.5 text-xs text-neutral-400 transition-all duration-300 hover:border-neutral-600 hover:text-neutral-200">
                           Cancelar
                         </button>
                       </div>
@@ -485,32 +487,32 @@ export default function HomePage() {
       {/* Modal de Sesiones pasadas */}
       {sesionesModalAbierto && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in"
           onClick={() => setSesionesModalAbierto(false)}
         >
           <div
-            className="w-full max-w-lg rounded-xl border border-neutral-800 bg-neutral-950 p-6 max-h-[80vh] overflow-y-auto"
+            className="animate-modal-in w-full max-w-lg rounded-2xl border border-white/10 bg-neutral-950/95 backdrop-blur-xl p-6 max-h-[80vh] overflow-y-auto shadow-2xl [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-neutral-700 [&::-webkit-scrollbar-thumb]:rounded-full"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-lg font-semibold">Sesiones pasadas</h2>
+              <h2 className="text-lg font-semibold tracking-tight">Sesiones pasadas</h2>
               <button
                 onClick={() => setSesionesModalAbierto(false)}
-                className="text-neutral-500 hover:text-neutral-300 text-xl leading-none"
+                className="text-neutral-500 hover:text-neutral-200 text-xl leading-none w-8 h-8 flex items-center justify-center rounded-full transition-colors hover:bg-white/5"
               >
                 ×
               </button>
             </div>
 
             {sesiones.length === 0 ? (
-              <p className="text-sm text-neutral-500">No hay sesiones todavía.</p>
+              <p className="text-sm text-neutral-500 text-center py-8">No hay sesiones todavía.</p>
             ) : (
               <div className="flex flex-col gap-2">
                 {sesiones.map((s) => (
                   <div
                     key={s.id}
                     onClick={() => router.push(`/sondeo/${s.id}`)}
-                    className="group flex items-center justify-between rounded-lg border border-neutral-800 bg-neutral-900 p-3 cursor-pointer hover:border-neutral-700"
+                    className="group flex items-center justify-between rounded-xl border border-neutral-900 bg-neutral-900/50 p-3 cursor-pointer transition-all duration-200 hover:border-neutral-700 hover:bg-neutral-900"
                   >
                     <div className="flex flex-col">
                       <span className="text-sm text-neutral-200">

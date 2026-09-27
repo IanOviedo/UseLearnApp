@@ -146,8 +146,9 @@ export default function SondeoPage() {
 
   if (cargandoInicial) {
     return (
-      <div className="min-h-screen bg-neutral-950 text-neutral-100 flex items-center justify-center">
-        <p className="text-neutral-400">Cargando pregunta...</p>
+      <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col items-center justify-center gap-4">
+        <div className="h-6 w-6 rounded-full border-2 border-neutral-700 border-t-neutral-300 animate-spin" />
+        <p className="text-sm text-neutral-500">Cargando pregunta...</p>
       </div>
     );
   }
@@ -155,10 +156,12 @@ export default function SondeoPage() {
   if (error) {
     return (
       <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col items-center justify-center gap-4">
-        <p className="text-red-500">{error}</p>
+        <div className="rounded-2xl border border-red-500/20 bg-red-500/[0.06] px-8 py-6">
+          <p className="text-sm text-red-400">{error}</p>
+        </div>
         <button
           onClick={() => router.push("/")}
-          className="rounded-full bg-neutral-100 text-neutral-900 px-5 py-2 font-medium"
+          className="rounded-full bg-neutral-100 text-neutral-900 px-5 py-2 font-medium transition-all duration-300 hover:bg-white hover:shadow-lg"
         >
           Volver al inicio
         </button>
@@ -167,9 +170,12 @@ export default function SondeoPage() {
   }
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 px-8 py-12">
-      <div className="max-w-xl mx-auto flex flex-col gap-8">
-        <p className="text-sm text-neutral-500">Sondeo</p>
+    <div className="relative min-h-screen bg-neutral-950 text-neutral-100 px-8 py-12 overflow-hidden">
+      {/* Glow sutil de fondo */}
+      <div className="pointer-events-none absolute -top-32 left-1/2 h-96 w-[42rem] -translate-x-1/2 rounded-full bg-indigo-500/[0.07] blur-3xl" />
+
+      <div className="relative max-w-xl mx-auto flex flex-col gap-8">
+        <p className="text-xs uppercase tracking-[0.2em] text-neutral-600">Sondeo</p>
 
         {historial.map((item, index) => {
           const respondida = item.opcionElegida !== null;
@@ -178,15 +184,15 @@ export default function SondeoPage() {
           return (
             <div
               key={index}
-              className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-8"
+              className="animate-fade-in-up rounded-2xl border border-white/[0.06] bg-neutral-900/40 p-8 shadow-[0_24px_48px_-24px_rgba(0,0,0,0.8)]"
             >
-              <h2 className="text-xl font-semibold mb-6">{item.pregunta.pregunta}</h2>
+              <h2 className="text-xl font-semibold tracking-tight mb-6">{item.pregunta.pregunta}</h2>
 
               <div className="flex flex-col gap-3">
                 {item.pregunta.opciones.map((opcion, opcionIndex) => {
                   const esElegida = item.opcionElegida === opcion;
                   const esCorrecta = opcion === item.pregunta.opciones[item.pregunta.indiceCorrecta];
-                  let estilos = "border-neutral-700 hover:border-neutral-500";
+                  let estilos = "border-neutral-800 bg-neutral-950/40 hover:border-neutral-600 hover:bg-neutral-900/70";
 
                   if (respondida) {
                     if (esCorrecta) {
@@ -203,7 +209,7 @@ export default function SondeoPage() {
                       key={opcionIndex}
                       onClick={() => elegirOpcion(index, opcion)}
                       disabled={respondida}
-                      className={`text-left rounded-lg border px-4 py-3 transition-colors ${estilos}`}
+                      className={`text-left rounded-xl border px-4 py-3.5 transition-all duration-200 disabled:cursor-default ${estilos}`}
                     >
                       {opcion}
                     </button>
@@ -215,7 +221,7 @@ export default function SondeoPage() {
                 <button
                   onClick={() => responderYAvanzar(index)}
                   disabled={cargandoSiguiente}
-                  className="mt-6 w-full rounded-full bg-neutral-100 text-neutral-900 px-5 py-3 font-medium disabled:opacity-50"
+                  className="mt-6 w-full rounded-full bg-neutral-100 text-neutral-900 px-5 py-3 font-medium transition-all duration-300 hover:bg-white hover:shadow-lg disabled:opacity-50"
                 >
                   {cargandoSiguiente ? "Cargando..." : "Siguiente →"}
                 </button>
@@ -225,12 +231,13 @@ export default function SondeoPage() {
         })}
 
         {completo && (
-          <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-8 text-center flex flex-col items-center gap-6">
-            <h1 className="text-2xl font-bold">¡Sondeo completo!</h1>
-            <p className="text-neutral-400 whitespace-pre-wrap">{feedback}</p>
+          <div className="animate-fade-in-up rounded-2xl border border-white/[0.06] bg-neutral-900/40 p-8 text-center flex flex-col items-center gap-6 shadow-[0_24px_48px_-24px_rgba(0,0,0,0.8)]">
+            <span className="flex h-12 w-12 items-center justify-center rounded-full border border-emerald-500/30 bg-emerald-500/10 text-xl text-emerald-400">✓</span>
+            <h1 className="text-2xl font-bold tracking-tight">¡Sondeo completo!</h1>
+            <p className="text-neutral-400 whitespace-pre-wrap leading-relaxed">{feedback}</p>
             <button
               onClick={() => router.push("/")}
-              className="rounded-full bg-neutral-100 text-neutral-900 px-5 py-2 font-medium"
+              className="rounded-full bg-neutral-100 text-neutral-900 px-5 py-2 font-medium transition-all duration-300 hover:bg-white hover:shadow-lg"
             >
               Volver al inicio
             </button>

@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0a0a0a;
+  --foreground: #ededed;
 }
 
 @theme inline {
@@ -12,17 +12,21 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Selección de texto discreta, acorde al tema oscuro */
+::selection {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+/* Anillo de foco visible y sutil para navegación con teclado */
+:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.35);
+  outline-offset: 2px;
 }
 
 @keyframes blob-slow {
@@ -67,5 +71,44 @@ body {
 
 .notas-textarea::-webkit-scrollbar-thumb:hover {
   background-color: rgba(255, 255, 255, 0.35);
+}
+
+/* --- Animaciones de entrada (solo presentación) --- */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.4s ease-out both;
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-modal-in {
+  animation: modal-in 0.25s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Respetar la preferencia de movimiento reducido del sistema */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-fade-in-up,
+  .animate-modal-in,
+  .animate-blob-slow,
+  .animate-blob-slower {
+    animation: none !important;
+  }
 }
 
