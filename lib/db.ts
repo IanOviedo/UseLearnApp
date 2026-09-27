@@ -133,9 +133,9 @@ function guardarPregunta(sesionId: number, subtemaId: number, fase: string, cont
     .run(sesionId, subtemaId, fase, contenido, tipo);
 }
 
-function obtenerPreguntasPrevias(sesionId: number, subtemaId: number): string[] {
-  const rows = db.prepare("SELECT contenido FROM preguntas WHERE sesion_id = ? AND subtema_id = ?")
-    .all(sesionId, subtemaId) as { contenido: string }[];
+function obtenerPreguntasPrevias(sesionId: number): string[] {
+  const rows = db.prepare("SELECT contenido FROM preguntas WHERE sesion_id = ?")
+    .all(sesionId) as { contenido: string }[];
 
   return rows.map(row => {
     try {

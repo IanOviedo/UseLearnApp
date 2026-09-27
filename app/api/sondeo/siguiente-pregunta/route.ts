@@ -66,7 +66,7 @@ if (!sesion) {
         { status: 400 }
       );
     }
-    const preguntasPrevias = obtenerPreguntasPrevias(sesionId, subtema.id);
+    const preguntasPrevias = obtenerPreguntasPrevias(sesionId);
     const pregunta = await generarPregunta(subtema.nombre, sesion.textoOriginal, modeloPreguntas, proveedorInfo, preguntasPrevias);
     guardarPregunta(sesionId, subtema.id, "sondeo", JSON.stringify(pregunta), "multiple_choice");
     return NextResponse.json({
