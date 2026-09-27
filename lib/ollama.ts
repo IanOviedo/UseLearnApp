@@ -92,6 +92,31 @@ ${bloqueHistorial}Reglas:
 - El array "opciones" debe tener EXACTAMENTE 4 elementos, todos con texto no vacío. No agregues elementos extra ni strings vacíos.`;
 }
 
+function construirPromptLotePreguntas(
+  subtema: string,
+  textoOriginal: string
+): string {
+  return `Basándote en el siguiente texto de estudio, generá EXACTAMENTE 3 preguntas de opción múltiple sobre el subtema "${subtema}".
+
+Texto de estudio:
+${textoOriginal}
+
+Para cada pregunta, pensá primero internamente cuál opción es la correcta antes de escribir el JSON.
+
+Reglas:
+- La pregunta y todas las opciones deben basarse solo en lo que dice el texto de estudio, no en conocimiento general de React.
+- Exactamente 4 opciones por pregunta.
+- "indiceCorrecta" debe ser un número entero de 0 a 3.
+- Cada pregunta debe evaluar comprensión real, no ser trivial.
+- El array "opciones" de cada pregunta debe tener EXACTAMENTE 4 elementos, todos con texto no vacío.
+- Las 3 preguntas deben cubrir aspectos DISTINTOS del subtema, sin reformular la misma idea.
+
+Respondé ÚNICAMENTE con un array JSON de exactamente 3 objetos, cada uno con esta forma exacta:
+{"pregunta": "...", "opciones": ["...", "...", "...", "..."], "indiceCorrecta": 0}
+
+No agregues texto antes ni después del array JSON.`;
+}
+
 function limpiarOpcion(texto: string): string {
   return texto
     .replace(/^(opci[oó]n\s*)?[a-d][.):]\s*/i, "")
@@ -132,6 +157,45 @@ function parsearRespuestaPregunta(rawText: string): Pregunta {
   parsed.opciones = parsed.opciones.map(limpiarOpcion);
 
   return parsed as Pregunta;
+}
+
+function parsearLotePreguntas(rawText: string): Pregunta[] {
+  let cleanText = rawText.trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/```\s*$/i, "")
+    .trim();
+
+  const firstBracket = cleanText.indexOf("[");
+  const lastBracket = cleanText.lastIndexOf("]");
+  if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
+    cleanText = cleanText.slice(firstBracket, lastBracket + 1);
+  }
+
+  const parsed = JSON.parse(cleanText);
+
+  if (!Array.isArray(parsed)) {
+    throw new Error(`Se esperaba un array de preguntas: ${JSON.stringify(parsed)}`);
+  }
+
+  return parsed.map((item) => {
+    if (Array.isArray(item.opciones)) {
+      item.opciones = item.opciones.filter(
+        (o: unknown) => typeof o === "string" && o.trim().length > 0
+      );
+    }
+    if (
+      typeof item.pregunta !== "string" ||
+      !Array.isArray(item.opciones) ||
+      item.opciones.length !== 4 ||
+      !Number.isInteger(item.indiceCorrecta) ||
+      item.indiceCorrecta < 0 ||
+      item.indiceCorrecta >= item.opciones.length
+    ) {
+      throw new Error(`Estructura inválida en el lote: ${JSON.stringify(item)}`);
+    }
+    item.opciones = item.opciones.map(limpiarOpcion);
+    return item as Pregunta;
+  });
 }
 
 async function fetchGeminiConReintento(url: string, body: string): Promise<Response> {
