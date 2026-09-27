@@ -111,6 +111,12 @@ function parsearRespuestaPregunta(rawText: string): Pregunta {
 
   const parsed = JSON.parse(cleanText);
 
+  if (Array.isArray(parsed.opciones)) {
+    parsed.opciones = parsed.opciones.filter(
+      (o: unknown) => typeof o === "string" && o.trim().length > 0
+    );
+  }
+
   if (
     typeof parsed.pregunta !== "string" ||
     !Array.isArray(parsed.opciones) ||
