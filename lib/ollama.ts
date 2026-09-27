@@ -88,7 +88,8 @@ ${bloqueHistorial}Reglas:
 - La pregunta y todas las opciones deben basarse solo en lo que dice el texto de estudio, no en conocimiento general de React.
 - Exactamente 4 opciones.
 - "indiceCorrecta" debe ser un número entero de 0 a 3, correspondiente a tu propio razonamiento del paso 4.
-- La pregunta debe evaluar comprensión real, no ser trivial.`;
+- La pregunta debe evaluar comprensión real, no ser trivial.
+- El array "opciones" debe tener EXACTAMENTE 4 elementos, todos con texto no vacío. No agregues elementos extra ni strings vacíos.`;
 }
 
 function limpiarOpcion(texto: string): string {
