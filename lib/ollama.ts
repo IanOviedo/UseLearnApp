@@ -330,6 +330,105 @@ export async function generarPreguntaOpenAICompat(
   return parsearRespuestaPregunta(contenido);
 }
 
+export async function generarLotePreguntas(
+  subtema: string,
+  textoOriginal: string,
+  modelo: string = "gemma4:26b",
+  proveedorInfo?: ProveedorNube
+): Promise<Pregunta[]> {
+  const prompt = construirPromptLotePreguntas(subtema, textoOriginal);
+
+  if (proveedorInfo) {
+    const res = await fetch(`${proveedorInfo.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${proveedorInfo.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "openai/gpt-oss-120b",
+        messages: [{ role: "user", content: prompt }],
+        response_format: { type: "json_object" },
+      }),
+    });
+    if (!res.ok) {
+      const textoError = await res.text();
+      throw new Error(`Error de ${proveedorInfo.nombre} (${res.status}): ${textoError}`);
+    }
+    const data = await res.json();
+    return parsearLotePreguntas(data.choices[0].message.content);
+  }
+
+  const proveedorConfigurado = buscarProveedorPorNombreDeModelo(modelo);
+  if (proveedorConfigurado) {
+    return generarLotePreguntas(subtema, textoOriginal, modelo, proveedorConfigurado);
+  }
+
+  if (modelo.startsWith("gemini")) {
+    const response = await fetchGeminiConReintento(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0 },
+      })
+    );
+
+    if (!response.ok) {
+      if (response.status === 429) {
+        throw new Error(
+          "Se alcanzó el límite de uso gratuito de Gemini por hoy. Probá con un modelo local, o esperá a mañana."
+        );
+      }
+      throw new Error(`Gemini API error: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (typeof rawText !== "string") {
+      throw new Error(`Unexpected Gemini response shape: ${JSON.stringify(data)}`);
+    }
+
+    try {
+      return parsearLotePreguntas(rawText);
+    } catch (error) {
+      console.error("=== RAW MODEL RESPONSE (generarLotePreguntas) ===", rawText);
+      throw new Error(
+        `Failed to parse model response as JSON: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  const response = await fetch("http://localhost:11434/api/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: modelo,
+      prompt,
+      stream: false,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Ollama API error: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+
+  if (typeof data.response !== "string") {
+    throw new Error(`Unexpected Ollama response shape: ${JSON.stringify(data)}`);
+  }
+
+  try {
+    return parsearLotePreguntas(data.response);
+  } catch (error) {
+    console.error("=== RAW MODEL RESPONSE (generarLotePreguntas) ===", data.response);
+    throw new Error(
+      `Failed to parse model response as JSON: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
 
 export async function generarPregunta(
   subtema: string,
