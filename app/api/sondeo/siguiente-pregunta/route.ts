@@ -6,6 +6,7 @@ import {
   sondeoCompleto,
   obtenerPreguntasSinResponder,
   guardarPregunta,
+  guardarFeedbackFinal,
 } from "@/lib/db";
 import { generarPregunta, generarLotePreguntas, generarFeedbackSondeo } from "@/lib/ollama";
 import type { ProveedorNube } from "@/lib/proveedores";
@@ -38,6 +39,11 @@ export async function GET(request: NextRequest) {
   }
   try {
     if (sondeoCompleto(sesionId)) {
+      const sesionExistente = obtenerSesion(sesionId);
+      if (sesionExistente && sesionExistente.feedbackFinal !== null) {
+        return NextResponse.json({ completo: true, feedback: sesionExistente.feedbackFinal });
+      }
+
       const subtemas = obtenerSubtemas(sesionId);
 
         const resultados = subtemas.map((s) => ({
@@ -48,6 +54,7 @@ export async function GET(request: NextRequest) {
       }));
 
       const feedback = await generarFeedbackSondeo(resultados, modeloPrincipal);
+      guardarFeedbackFinal(sesionId, feedback);
       return NextResponse.json({ completo: true, feedback });
     }
 
