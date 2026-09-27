@@ -12,6 +12,7 @@ interface Pregunta {
 interface SiguientePreguntaResponse {
   completo: boolean;
   subtemaId?: number;
+  preguntaId?: number;
   pregunta?: Pregunta;
   feedback?: string;
   error?: string;
@@ -19,6 +20,7 @@ interface SiguientePreguntaResponse {
 
 interface PreguntaEnCurso {
   subtemaId: number;
+  preguntaId: number;
   pregunta: Pregunta;
   opcionElegida: string | null;
 }
@@ -98,7 +100,7 @@ export default function SondeoPage() {
         const preguntaConOpcionesBarajadas = barajarPregunta(data.pregunta);
         setHistorial((prev) => [
           ...prev,
-          { subtemaId: data.subtemaId!, pregunta: preguntaConOpcionesBarajadas, opcionElegida: null },
+          { subtemaId: data.subtemaId!, preguntaId: data.preguntaId!, pregunta: preguntaConOpcionesBarajadas, opcionElegida: null },
         ]);
       }
     } catch {
@@ -134,7 +136,7 @@ export default function SondeoPage() {
       await fetch("/api/sondeo/responder", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subtemaId: item.subtemaId, correcta }),
+        body: JSON.stringify({ subtemaId: item.subtemaId, correcta, preguntaId: item.preguntaId }),
       });
     } catch {
       // si falla el POST igual seguimos, no bloqueamos el flujo del usuario
