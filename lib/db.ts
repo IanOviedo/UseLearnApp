@@ -11,6 +11,12 @@ db.exec(`CREATE TABLE IF NOT EXISTS sesiones (
   creada_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 )`);
 
+// Migración: agregar feedback_final si no existe todavía (para bases ya creadas)
+const columnasSesiones = db.prepare("PRAGMA table_info(sesiones)").all() as { name: string }[];
+const tieneFeedbackFinal = columnasSesiones.some(col => col.name === "feedback_final");
+if (!tieneFeedbackFinal) {
+  db.exec("ALTER TABLE sesiones ADD COLUMN feedback_final TEXT");
+}
 
 
 db.exec(`CREATE TABLE IF NOT EXISTS subtemas (
@@ -164,7 +170,46 @@ function marcarPreguntaRespondida(preguntaId: number): void {
   db.prepare("UPDATE preguntas SET respondida = 1 WHERE id = ?").run(preguntaId);
 }
 
+function guardarFeedbackFinal(sesionId: number, feedback: string): void {
+  db.prepare("UPDATE sesiones SET feedback_final = ? WHERE id = ?").run(feedback, sesionId);
+}
+
+function listarSesionesConEstado(): {
+  id: number;
+  creadoEn: string;
+  completa: boolean;
+  totalPreguntas: number;
+  preguntasRespondidas: number;
+}[] {
+  const sesiones = db.prepare("SELECT id, creada_en, feedback_final FROM sesiones ORDER BY creada_en DESC")
+    .all() as { id: number, creada_en: string, feedback_final: string | null }[];
+
+  const conteos = db.prepare(
+    "SELECT sesion_id, COUNT(*) AS total, COALESCE(SUM(respondida), 0) AS respondidas FROM preguntas GROUP BY sesion_id"
+  ).all() as { sesion_id: number, total: number, respondidas: number }[];
+
+  const conteosPorSesion = new Map(conteos.map(conteo => [conteo.sesion_id, conteo]));
+
+  return sesiones.map(sesion => {
+    const conteo = conteosPorSesion.get(sesion.id);
+    return {
+      id: sesion.id,
+      creadoEn: sesion.creada_en,
+      completa: sesion.feedback_final !== null,
+      totalPreguntas: conteo?.total ?? 0,
+      preguntasRespondidas: conteo?.respondidas ?? 0,
+    };
+  });
+}
+
+const eliminarSesion = db.transaction((sesionId: number): void => {
+  db.prepare("DELETE FROM respuestas WHERE pregunta_id IN (SELECT id FROM preguntas WHERE sesion_id = ?)").run(sesionId);
+  db.prepare("DELETE FROM preguntas WHERE sesion_id = ?").run(sesionId);
+  db.prepare("DELETE FROM subtemas WHERE sesion_id = ?").run(sesionId);
+  db.prepare("DELETE FROM sesiones WHERE id = ?").run(sesionId);
+});
+
 
 export default db;
-export { crearSesion, agregarSubtema, obtenerSubtemas, actualizarAciertos, obtenerSesion, elegirSiguienteSubtema, sondeoCompleto, guardarPregunta, obtenerPreguntasPrevias, obtenerPreguntasSinResponder, marcarPreguntaRespondida };
+export { crearSesion, agregarSubtema, obtenerSubtemas, actualizarAciertos, obtenerSesion, elegirSiguienteSubtema, sondeoCompleto, guardarPregunta, obtenerPreguntasPrevias, obtenerPreguntasSinResponder, marcarPreguntaRespondida, guardarFeedbackFinal, listarSesionesConEstado, eliminarSesion };
 
