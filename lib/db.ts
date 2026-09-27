@@ -37,6 +37,13 @@ db.exec(`CREATE TABLE IF NOT EXISTS preguntas (
   tipo TEXT NOT NULL CHECK (tipo IN ('multiple_choice', 'libre'))
 )`);
 
+// Migración: agregar respondida si no existe todavía (para bases ya creadas)
+const columnasPreguntas = db.prepare("PRAGMA table_info(preguntas)").all() as { name: string }[];
+const tieneRespondida = columnasPreguntas.some(col => col.name === "respondida");
+if (!tieneRespondida) {
+  db.exec("ALTER TABLE preguntas ADD COLUMN respondida INTEGER NOT NULL DEFAULT 0");
+}
+
 db.exec(`CREATE TABLE IF NOT EXISTS respuestas (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   pregunta_id INTEGER NOT NULL REFERENCES preguntas(id),
@@ -128,9 +135,10 @@ function sondeoCompleto(sesionId: number): boolean {
   }
   return subtemas.every(subtema => subtema.cubierto);
 }
-function guardarPregunta(sesionId: number, subtemaId: number, fase: string, contenido: string, tipo: string): void {
-  db.prepare("INSERT INTO preguntas (sesion_id, subtema_id, fase, contenido, tipo) VALUES (?, ?, ?, ?, ?)")
+function guardarPregunta(sesionId: number, subtemaId: number, fase: string, contenido: string, tipo: string): number {
+  const resultado = db.prepare("INSERT INTO preguntas (sesion_id, subtema_id, fase, contenido, tipo) VALUES (?, ?, ?, ?, ?)")
     .run(sesionId, subtemaId, fase, contenido, tipo);
+  return Number(resultado.lastInsertRowid);
 }
 
 function obtenerPreguntasPrevias(sesionId: number): string[] {
@@ -147,7 +155,16 @@ function obtenerPreguntasPrevias(sesionId: number): string[] {
   }).filter(texto => texto.length > 0);
 }
 
+function obtenerPreguntasSinResponder(subtemaId: number): { id: number; contenido: string }[] {
+  return db.prepare("SELECT id, contenido FROM preguntas WHERE subtema_id = ? AND respondida = 0")
+    .all(subtemaId) as { id: number; contenido: string }[];
+}
+
+function marcarPreguntaRespondida(preguntaId: number): void {
+  db.prepare("UPDATE preguntas SET respondida = 1 WHERE id = ?").run(preguntaId);
+}
+
 
 export default db;
-export { crearSesion, agregarSubtema, obtenerSubtemas, actualizarAciertos, obtenerSesion, elegirSiguienteSubtema, sondeoCompleto, guardarPregunta, obtenerPreguntasPrevias };
+export { crearSesion, agregarSubtema, obtenerSubtemas, actualizarAciertos, obtenerSesion, elegirSiguienteSubtema, sondeoCompleto, guardarPregunta, obtenerPreguntasPrevias, obtenerPreguntasSinResponder, marcarPreguntaRespondida };
 
