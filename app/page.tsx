@@ -27,6 +27,20 @@ interface ModeloOllama {
   tamano: number;
 }
 
+interface SesionConEstado {
+  id: number;
+  creadoEn: string;
+  completa: boolean;
+  totalPreguntas: number;
+  preguntasRespondidas: number;
+}
+
+function formatearFecha(creadoEn: string): string {
+  const iso = creadoEn.includes("T") ? creadoEn : creadoEn.replace(" ", "T");
+  const fecha = new Date(iso.endsWith("Z") ? iso : iso + "Z");
+  return fecha.toLocaleString("es-AR", { dateStyle: "medium", timeStyle: "short" });
+}
+
 export default function HomePage() {
   const router = useRouter();
   const [texto, setTexto] = useState("");
@@ -47,8 +61,10 @@ export default function HomePage() {
   const [nuevoFormato, setNuevoFormato] = useState<"openai" | "gemini-nativo">("openai");
 
 
-  const [sesionesAbiertas, setSesionesAbiertas] = useState(true);
   const [subiendoArchivo, setSubiendoArchivo] = useState(false);
+
+  const [sesionesModalAbierto, setSesionesModalAbierto] = useState(false);
+  const [sesiones, setSesiones] = useState<SesionConEstado[]>([]);
 
   useEffect(() => {
     const guardadoPrincipal = localStorage.getItem("uselearn:modeloPrincipal");
@@ -71,6 +87,32 @@ export default function HomePage() {
       // silencioso: el modal muestra el estado vacío si falla
     } finally {
       setCargandoModelos(false);
+    }
+  }
+
+  async function abrirSesiones() {
+    setSesionesModalAbierto(true);
+    try {
+      const res = await fetch("/api/sesiones/listar");
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setSesiones(data);
+      }
+    } catch {
+      // silencioso: el modal muestra la lista vacía si falla
+    }
+  }
+
+  async function eliminarSesionModal(id: number) {
+    try {
+      await fetch("/api/sesiones/eliminar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sesionId: id }),
+      });
+      setSesiones((prev) => prev.filter((s) => s.id !== id));
+    } catch {
+      // silencioso: la lista se refresca al volver a abrir el modal
     }
   }
 
@@ -264,16 +306,11 @@ export default function HomePage() {
 
         {/* Sesiones pasadas */}
         <button
-          onClick={() => setSesionesAbiertas((v) => !v)}
+          onClick={abrirSesiones}
           className="mt-6 w-full rounded-xl border border-neutral-800 bg-neutral-900/50 p-6 flex items-center gap-3 text-neutral-400 text-left"
         >
           <span className="text-xl">🕓</span>
           <span className="font-medium text-neutral-200">Sesiones pasadas</span>
-          <span
-            className={`transition-transform ${sesionesAbiertas ? "rotate-0" : "rotate-180"}`}
-          >
-            ↑
-          </span>
         </button>
       </main>
 
@@ -441,6 +478,64 @@ export default function HomePage() {
 
              </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Sesiones pasadas */}
+      {sesionesModalAbierto && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => setSesionesModalAbierto(false)}
+        >
+          <div
+            className="w-full max-w-lg rounded-xl border border-neutral-800 bg-neutral-950 p-6 max-h-[80vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-semibold">Sesiones pasadas</h2>
+              <button
+                onClick={() => setSesionesModalAbierto(false)}
+                className="text-neutral-500 hover:text-neutral-300 text-xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+
+            {sesiones.length === 0 ? (
+              <p className="text-sm text-neutral-500">No hay sesiones todavía.</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {sesiones.map((s) => (
+                  <div
+                    key={s.id}
+                    onClick={() => router.push(`/sondeo/${s.id}`)}
+                    className="group flex items-center justify-between rounded-lg border border-neutral-800 bg-neutral-900 p-3 cursor-pointer hover:border-neutral-700"
+                  >
+                    <div className="flex flex-col">
+                      <span className="text-sm text-neutral-200">
+                        {formatearFecha(s.creadoEn)}
+                      </span>
+                      <span className="text-xs text-neutral-500">
+                        {s.completa
+                          ? "Completo ✓"
+                          : `${s.preguntasRespondidas}/${s.totalPreguntas} preguntas`}
+                      </span>
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        eliminarSesionModal(s.id);
+                      }}
+                      title="Eliminar sesión"
+                      className="opacity-0 group-hover:opacity-100 text-neutral-500 hover:text-red-400 transition-opacity"
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
