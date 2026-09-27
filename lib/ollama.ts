@@ -177,7 +177,7 @@ function parsearLotePreguntas(rawText: string): Pregunta[] {
     throw new Error(`Se esperaba un array de preguntas: ${JSON.stringify(parsed)}`);
   }
 
-  return parsed.map((item) => {
+  const preguntas = parsed.map((item) => {
     if (Array.isArray(item.opciones)) {
       item.opciones = item.opciones.filter(
         (o: unknown) => typeof o === "string" && o.trim().length > 0
@@ -196,6 +196,16 @@ function parsearLotePreguntas(rawText: string): Pregunta[] {
     item.opciones = item.opciones.map(limpiarOpcion);
     return item as Pregunta;
   });
+
+  const vistas = new Set<string>();
+  const preguntasUnicas = preguntas.filter((p) => {
+    const clave = p.pregunta.trim().toLowerCase();
+    if (vistas.has(clave)) return false;
+    vistas.add(clave);
+    return true;
+  });
+
+  return preguntasUnicas;
 }
 
 async function fetchGeminiConReintento(url: string, body: string): Promise<Response> {
