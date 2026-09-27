@@ -181,7 +181,7 @@ export default function SondeoPage() {
               <h2 className="text-xl font-semibold mb-6">{item.pregunta.pregunta}</h2>
 
               <div className="flex flex-col gap-3">
-                {item.pregunta.opciones.map((opcion) => {
+                {item.pregunta.opciones.map((opcion, opcionIndex) => {
                   const esElegida = item.opcionElegida === opcion;
                   const esCorrecta = opcion === item.pregunta.opciones[item.pregunta.indiceCorrecta];
                   let estilos = "border-neutral-700 hover:border-neutral-500";
@@ -198,7 +198,7 @@ export default function SondeoPage() {
 
                   return (
                     <button
-                      key={opcion}
+                      key={opcionIndex}
                       onClick={() => elegirOpcion(index, opcion)}
                       disabled={respondida}
                       className={`text-left rounded-lg border px-4 py-3 transition-colors ${estilos}`}
