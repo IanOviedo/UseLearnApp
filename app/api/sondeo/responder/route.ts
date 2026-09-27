@@ -1,18 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { actualizarAciertos } from "@/lib/db";
+import { actualizarAciertos, marcarPreguntaRespondida } from "@/lib/db";
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { subtemaId, correcta } = body;
+    const { subtemaId, correcta, preguntaId } = body;
 
-    if (typeof subtemaId !== "number" || typeof correcta !== "boolean") {
+    if (typeof subtemaId !== "number" || typeof correcta !== "boolean" || typeof preguntaId !== "number") {
       return NextResponse.json(
-        { error: "Body inválido: se espera { subtemaId: number, correcta: boolean }" },
+        { error: "Body inválido: se espera { subtemaId: number, correcta: boolean, preguntaId: number }" },
         { status: 400 }
       );
     }
     actualizarAciertos(subtemaId, correcta);
+    marcarPreguntaRespondida(preguntaId);
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error("Error en responder:", error);
