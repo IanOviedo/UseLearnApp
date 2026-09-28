@@ -1,16 +1,14 @@
 import { buscarProveedorPorNombreDeModelo, type ProveedorNube } from "./proveedores"
 
-export async function extraerSubtemas(texto: string, modelo: string = "gemma4:26b"): Promise<string[]> {
+async function llamarOllama(modelo: string, prompt: string, think: boolean = false): Promise<string> {
   const response = await fetch("http://localhost:11434/api/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: modelo,
-      prompt: `Extract the key sub-topics/concepts from the following text. Respond with ONLY a JSON array of short strings, nothing else (example: ["useState básico", "useEffect y dependencias", "props vs state"]).
-
-Text:
-${texto}`,
+      prompt,
       stream: false,
+      think,
     }),
   });
 
@@ -24,7 +22,21 @@ ${texto}`,
     throw new Error(`Unexpected Ollama response shape: ${JSON.stringify(data)}`);
   }
 
-  const rawText = data.response.trim();
+  // Flag "s" (dotAll) vía constructor: el target de TS del proyecto es ES2017 y no acepta el literal /…/s.
+  return data.response
+    .replace(new RegExp("<think>.*?</think>", "s"), "")
+    .replace(new RegExp("<thinking>.*?</thinking>", "s"), "")
+    .trim();
+}
+
+
+export async function extraerSubtemas(texto: string, modelo: string = "gemma4:26b"): Promise<string[]> {
+  const prompt = `Extract the key sub-topics/concepts from the following text. Respond with ONLY a JSON array of short strings, nothing else (example: ["useState básico", "useEffect y dependencias", "props vs state"]).
+
+Text:
+${texto}`;
+
+  const rawText = (await llamarOllama(modelo, prompt, false)).trim();
 
   let cleanText = rawText
     .replace(/^```(?:json)?\s*/i, "")
@@ -277,30 +289,12 @@ async function generarPreguntaOllama(
 ): Promise<Pregunta> {
   const prompt = construirPromptPregunta(subtema, textoOriginal, preguntasPrevias);
 
-  const response = await fetch("http://localhost:11434/api/generate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: modelo,
-      prompt,
-      stream: false,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Ollama API error: ${response.statusText}`);
-  }
-
-  const data = await response.json();
-
-  if (typeof data.response !== "string") {
-    throw new Error(`Unexpected Ollama response shape: ${JSON.stringify(data)}`);
-  }
+  const respuesta = await llamarOllama(modelo, prompt, false);
 
   try {
-    return parsearRespuestaPregunta(data.response);
+    return parsearRespuestaPregunta(respuesta);
   } catch (error) {
-    console.error("=== RAW MODEL RESPONSE (generarPreguntaOllama) ===", data.response);
+    console.error("=== RAW MODEL RESPONSE (generarPreguntaOllama) ===", respuesta);
     throw new Error(
       `Failed to parse model response as JSON: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -409,30 +403,12 @@ export async function generarLotePreguntas(
     }
   }
 
-  const response = await fetch("http://localhost:11434/api/generate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: modelo,
-      prompt,
-      stream: false,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Ollama API error: ${response.statusText}`);
-  }
-
-  const data = await response.json();
-
-  if (typeof data.response !== "string") {
-    throw new Error(`Unexpected Ollama response shape: ${JSON.stringify(data)}`);
-  }
+  const respuesta = await llamarOllama(modelo, prompt, false);
 
   try {
-    return parsearLotePreguntas(data.response);
+    return parsearLotePreguntas(respuesta);
   } catch (error) {
-    console.error("=== RAW MODEL RESPONSE (generarLotePreguntas) ===", data.response);
+    console.error("=== RAW MODEL RESPONSE (generarLotePreguntas) ===", respuesta);
     throw new Error(
       `Failed to parse model response as JSON: ${error instanceof Error ? error.message : String(error)}`
     );
@@ -480,12 +456,7 @@ export async function generarFeedbackSondeo(
     )
     .join("\n");
 
-  const response = await fetch("http://localhost:11434/api/generate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: modelo,
-      prompt: `Sos un tutor de React. Un estudiante acaba de terminar un sondeo (quiz de diagnóstico) sobre varios sub-temas. Este es el resultado por sub-tema:
+  const prompt = `Sos un tutor de React. Un estudiante acaba de terminar un sondeo (quiz de diagnóstico) sobre varios sub-temas. Este es el resultado por sub-tema:
 
 ${resumen}
 
@@ -493,20 +464,7 @@ Escribí un feedback breve (3-5 oraciones) en español, directo y útil:
 - Destacá qué domina bien.
 - Señalá específicamente qué sub-temas necesita reforzar y por qué eso importa en la práctica.
 - No repitas los números tal cual (ya los vio), interpretalos.
-- Tono cercano, no genérico ni de manual.`,
-      stream: false,
-    }),
-  });
+- Tono cercano, no genérico ni de manual.`;
 
-  if (!response.ok) {
-    throw new Error(`Ollama API error: ${response.statusText}`);
-  }
-
-  const data = await response.json();
-
-  if (typeof data.response !== "string") {
-    throw new Error(`Unexpected Ollama response shape: ${JSON.stringify(data)}`);
-  }
-
-  return data.response.trim();
+  return (await llamarOllama(modelo, prompt, false)).trim();
 }
