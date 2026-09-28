@@ -1,10 +1,19 @@
+import type { ProveedorPayload } from "./tipos";
+
 export type ProveedorNube = {
   id: string;
   nombre: string;
   baseUrl: string;
   apiKey: string;
   formato: "openai" | "gemini-nativo";
+  /**
+   * Modelo que se le pide a la API. Antes estaba hardcodeado a "openai/gpt-oss-120b",
+   * así que todos los proveedores usaban ese modelo aunque ofrecieran uno más rápido.
+   * Es opcional para no romper los proveedores ya guardados en localStorage.
+   */
+  modelo?: string;
 };
+
 
 const STORAGE_KEY = "proveedoresNube";
 
@@ -45,13 +54,36 @@ export function eliminarProveedor(id: string): void {
   guardarProveedores(filtrados);
 }
 
-export function buscarProveedorPorNombreDeModelo(modelo: string): ProveedorNube | null {
-  const proveedores = obtenerProveedores();
-  const modeloLower = modelo.toLowerCase();
-  
-  const encontrado = proveedores.find((p) => 
-    modeloLower.startsWith(p.nombre.toLowerCase())
-  );
-  
-  return encontrado || null;
+/**
+ * Arma un ProveedorNube a partir de los datos que llegan en una petición.
+ * Necesario porque el servidor no puede leer localStorage: el cliente manda
+ * la config del proveedor elegido en cada request.
+ */
+export function proveedorDesdeParams(datos: ProveedorPayload): ProveedorNube | undefined {
+  const { nombre, baseUrl, apiKey, formato, modelo } = datos;
+
+  if (!nombre || !baseUrl || !apiKey) return undefined;
+  if (formato !== "openai" && formato !== "gemini-nativo") return undefined;
+
+  return {
+    id: "temporal",
+    nombre,
+    baseUrl,
+    apiKey,
+    formato,
+    modelo: modelo || undefined,
+  };
 }
+
+/**
+ * Busca el proveedor que maneja un modelo dado su nombre (se identifican por prefijo),
+ * o null si es un modelo local de Ollama o de Gemini nativo.
+ */
+export function proveedorDeModelo(
+  proveedores: ProveedorNube[],
+  nombreModelo: string
+): ProveedorNube | null {
+  const nombre = nombreModelo.toLowerCase();
+  return proveedores.find((p) => nombre.startsWith(p.nombre.toLowerCase())) ?? null;
+}
+
