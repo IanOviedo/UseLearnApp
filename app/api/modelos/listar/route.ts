@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { MODELOS_NO_GENERATIVOS } from "@/lib/config";
 
 interface OllamaModel {
   name: string;
@@ -17,10 +18,14 @@ export async function GET() {
       );
     }
     const data = await response.json();
-    const modelos = (data.models as OllamaModel[]).map((m) => ({
-      nombre: m.name,
-      tamano: m.size,
-    }));
+    const todos = (data.models ?? []) as OllamaModel[];
+
+    // Los modelos de embeddings (nomic-embed-text y compañía) no generan texto: si
+    // aparecían en el selector, elegirlos rompía la generación de preguntas.
+    const modelos = todos
+      .filter((m) => !MODELOS_NO_GENERATIVOS.some((fragmento) => m.name.toLowerCase().includes(fragmento)))
+      .map((m) => ({ nombre: m.name, tamano: m.size }));
+
     return NextResponse.json({ modelos });
   } catch (error) {
     console.error("Error listando modelos de Ollama:", error);
