@@ -85,7 +85,8 @@ function actualizarAciertos(subtemaId: number, correcta: boolean): void {
     db.prepare("UPDATE subtemas SET aciertos_seguidos = ?, cubierto = ? WHERE id = ?")
       .run(newAciertos, newCubierto, subtemaId);
   } else {
-    db.prepare("UPDATE subtemas SET aciertos_seguidos = 0, total_incorrectas = total_incorrectas + 1 WHERE id = ?")
+    // Al fallar, aciertos_seguidos vuelve a 0, así que el subtema deja de estar cubierto en el mismo UPDATE
+    db.prepare("UPDATE subtemas SET aciertos_seguidos = 0, cubierto = 0, total_incorrectas = total_incorrectas + 1 WHERE id = ?")
       .run(subtemaId);
   }
 }
