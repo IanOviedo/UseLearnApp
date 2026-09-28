@@ -236,16 +236,26 @@ function obtenerSubtemas(sesionId: number): SubtemaEstado[] {
 }
 
 /**
- * Sub-temas que quedaron sin dominar: tanto los que falló como los que nunca llegó a
- * cubrir (por ejemplo si el sondeo cerró por el tope de preguntas). Se calcula en el
- * servidor porque antes se derivaba del historial del cliente, que arranca vacío al
+ * Criterio único de "sub-tema débil": falló al menos una vez.
+ * Antes se derivaba de `cubierto = 0`, así que un sub-tema con un error que después se
+ * dominó (2 aciertos seguidos) quedaba como "dominado" y el feedback no lo mencionaba
+ * como área a reforzar, aunque el usuario sí hubiera fallado. `cubierto` dice dónde está
+ * parado hoy el sub-tema; `débil` dice si hubo error en el camino.
+ */
+function esSubtemaDebil(totalIncorrectas: number): boolean {
+  return totalIncorrectas > 0;
+}
+
+/**
+ * Sub-temas que falló al menos una vez (mismo criterio que esSubtemaDebil). Se calcula en
+ * el servidor porque antes se derivaba del historial del cliente, que arranca vacío al
  * recargar: reabrir una sesión pasada mostraba siempre "no fallaste ningún subtema".
  */
 function obtenerSubtemasDebiles(sesionId: number): string[] {
   const filas = db
     .prepare(
       `SELECT nombre FROM subtemas
-       WHERE sesion_id = ? AND cubierto = 0
+       WHERE sesion_id = ? AND total_incorrectas > 0
        ORDER BY total_incorrectas DESC, total_intentos ASC, id ASC`
     )
     .all(sesionId) as { nombre: string }[];
@@ -499,6 +509,7 @@ export {
   obtenerHistorialSesion,
   contarProgresoSesion,
   obtenerEstadoSondeo,
+  esSubtemaDebil,
   obtenerSubtemasDebiles,
   actualizarFaseSesion,
   finalizarSondeo,

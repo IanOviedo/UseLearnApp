@@ -394,6 +394,8 @@ export interface ResultadoSubtema {
   incorrectas: number;
   dominio: number;
   cubierto: boolean;
+  /** Falló al menos una vez: es lo que el feedback tiene que nombrar como área a reforzar. */
+  debil: boolean;
 }
 
 export interface ErrorSesion {
@@ -419,7 +421,10 @@ export async function generarFeedbackSondeo(
   const resumen = resultados
     .map((r) => {
       const dominio = Math.round(r.dominio * 100)
-      const estado = r.cubierto ? "dominado" : "le falta reforzar"
+      // "Débil" = falló al menos una vez (lo decide esSubtemaDebil en el servidor), no
+      // "cubierto hoy": un sub-tema que se dominó después de un error se sigue marcando
+      // como área a reforzar.
+      const estado = r.debil ? "le falta reforzar" : "dominado"
       return `- ${r.nombre}: ${r.intentos} respuestas, ${r.correctas} correctas, ${r.incorrectas} incorrectas (dominio ${dominio}%) — ${estado}`
     })
     .join("\n")
@@ -440,7 +445,14 @@ Escribí un feedback breve (3-5 oraciones) en español, directo y útil:
 - Señalá específicamente qué sub-temas necesita reforzar y por qué eso importa en la práctica. Si los errores muestran una confusión concreta entre dos conceptos, nombrá esa confusión.
 - No repitas los números tal cual (ya los vio), interpretalos.
 - No inventes errores que no estén en la lista de arriba.
-- Tono cercano, no genérico ni de manual.`
+- Tono cercano, no genérico ni de manual.
+- Escribí en texto plano: sin markdown, sin asteriscos, sin listas ni negritas.
+- Solo mencioná como áreas a reforzar los sub-temas marcados "le falta reforzar". Los marcados "dominado" no los presentes como débiles.`
 
-  return (await llamarModelo({ prompt, modelo, proveedor, esperaObjeto: false })).trim()
+  const respuesta = (await llamarModelo({ prompt, modelo, proveedor, esperaObjeto: false })).trim()
+
+  // Algunos modelos ignoran la consigna de texto plano y devuelven markdown igual: se
+  // limpian los asteriscos acá, antes de devolver el feedback (y de que el route lo
+  // guarde con finalizarSondeo), para que no lleguen ni a la pantalla ni a la base.
+  return respuesta.replace(/\*+/g, "")
 }

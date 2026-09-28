@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   contarProgresoSesion,
   elegirSiguienteSubtema,
+  esSubtemaDebil,
   finalizarSondeo,
   guardarPregunta,
   obtenerErroresSesion,
@@ -44,6 +45,9 @@ function resultadosDe(subtemas: SubtemaEstado[]): ResultadoSubtema[] {
     incorrectas: subtema.incorrectas,
     dominio: subtema.intentos > 0 ? subtema.correctas / subtema.intentos : 0,
     cubierto: subtema.cubierto,
+    // El feedback se arma con `debil`, no con `cubierto`: un sub-tema dominado en el que
+    // igual hubo un error sigue siendo área a reforzar.
+    debil: esSubtemaDebil(subtema.incorrectas),
   }));
 }
 
