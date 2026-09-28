@@ -401,8 +401,16 @@ export async function generarLotePreguntas(
 
   try {
     return parsearLotePreguntas(respuesta);
+  } catch {
+    // El modelo a veces devuelve un objeto en vez del array de 3 preguntas: se pide de nuevo una vez.
+  }
+
+  const respuestaReintento = await llamarOllama(modelo, prompt, false);
+
+  try {
+    return parsearLotePreguntas(respuestaReintento);
   } catch (error) {
-    console.error("=== RAW MODEL RESPONSE (generarLotePreguntas) ===", respuesta);
+    console.error("=== RAW MODEL RESPONSE (generarLotePreguntas) ===", respuestaReintento);
     throw new Error(
       `Failed to parse model response as JSON: ${error instanceof Error ? error.message : String(error)}`
     );
