@@ -2,7 +2,14 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { obtenerProveedores, eliminarProveedor, agregarProveedor, type ProveedorNube } from "@/lib/proveedores";
+import {
+  obtenerProveedores,
+  eliminarProveedor,
+  agregarProveedor,
+  proveedorDeModelo,
+  type ProveedorNube,
+} from "@/lib/proveedores";
+import { MODELO_GEMINI, MODELO_PRINCIPAL_POR_DEFECTO, MODELO_PREGUNTAS_POR_DEFECTO } from "@/lib/config";
 import {
   IconoAdjuntar,
   IconoAjustes,
@@ -44,6 +51,7 @@ interface ModeloOllama {
 
 interface SesionConEstado {
   id: number;
+  topic: string;
   creadoEn: string;
   completa: boolean;
   totalPreguntas: number;
@@ -66,13 +74,14 @@ export default function HomePage() {
   const [ajustesModalAbierto, setAjustesModalAbierto] = useState(false);
   const [modelosDisponibles, setModelosDisponibles] = useState<ModeloOllama[]>([]);
   const [cargandoModelos, setCargandoModelos] = useState(false);
-  const [modeloPrincipal, setModeloPrincipal] = useState("gemma4:26b");
-  const [modeloPreguntas, setModeloPreguntas] = useState("gemma4:26b");
+  const [modeloPrincipal, setModeloPrincipal] = useState(MODELO_PRINCIPAL_POR_DEFECTO);
+  const [modeloPreguntas, setModeloPreguntas] = useState(MODELO_PREGUNTAS_POR_DEFECTO);
   const [proveedores, setProveedores] = useState<ProveedorNube[]>([]);
   const [mostrandoFormProveedor, setMostrandoFormProveedor] = useState(false);
   const [nuevoNombre, setNuevoNombre] = useState("");
   const [nuevaBaseUrl, setNuevaBaseUrl] = useState("");
   const [nuevaApiKey, setNuevaApiKey] = useState("");
+  const [nuevoModelo, setNuevoModelo] = useState("");
   const [nuevoFormato, setNuevoFormato] = useState<"openai" | "gemini-nativo">("openai");
 
 
@@ -86,6 +95,9 @@ export default function HomePage() {
     const guardadoPreguntas = localStorage.getItem("uselearn:modeloPreguntas");
     if (guardadoPrincipal) setModeloPrincipal(guardadoPrincipal);
     if (guardadoPreguntas) setModeloPreguntas(guardadoPreguntas);
+    // Se cargan acá y no recién al abrir Ajustes: si no, al crear una sesión con un
+    // proveedor de nube elegido el componente no lo tenía en estado y no se mandaba.
+    setProveedores(obtenerProveedores());
   }, []);
 
   async function abrirAjustes() {
@@ -149,8 +161,13 @@ export default function HomePage() {
       const res = await fetch("/api/sesiones/crear", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ texto, modelo: modeloPrincipal }),
-        
+        body: JSON.stringify({
+          texto,
+          modeloPrincipal,
+          // La config del proveedor viaja en el body: el servidor no puede leer
+          // localStorage, así que ahí no hay forma de conseguirlo.
+          proveedor: proveedorDeModelo(proveedores, modeloPrincipal) ?? undefined,
+        }),
       });
       const data = await res.json();
       if (data.error) {
@@ -382,26 +399,35 @@ export default function HomePage() {
                 Modelo para sub-temas y feedback
               </p>
               <p className="text-xs text-neutral-500 mb-3">
-                Se usa al generar el quiz y al mostrar el feedback final del sondeo.
+                Se usa al crear el quiz y al generar el feedback final del sondeo.
               </p>
               {cargandoModelos ? (
                 <p className="text-xs text-neutral-600">Cargando modelos...</p>
-              ) : modelosDisponibles.length === 0 ? (
-                <p className="text-xs text-red-500">
-                  No se pudo conectar con Ollama en localhost:11434.
-                </p>
               ) : (
-                <select
-                  value={modeloPrincipal}
-                  onChange={(e) => guardarModeloPrincipal(e.target.value)}
-                  className="w-full rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 transition-colors focus:border-neutral-600 focus:outline-none"
-                >
-                  {modelosDisponibles.map((m) => (
-                    <option key={m.nombre} value={m.nombre}>
-                      {m.nombre}
-                    </option>
-                  ))}
-                </select>
+                <>
+                  <select
+                    value={modeloPrincipal}
+                    onChange={(e) => guardarModeloPrincipal(e.target.value)}
+                    className="w-full rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 transition-colors focus:border-neutral-600 focus:outline-none"
+                  >
+                    <option value={MODELO_GEMINI}>Gemini (nube) — {MODELO_GEMINI}</option>
+                    {modelosDisponibles.map((m) => (
+                      <option key={m.nombre} value={m.nombre}>
+                        {m.nombre}
+                      </option>
+                    ))}
+                    {proveedores.map((p) => (
+                      <option key={p.id} value={p.nombre}>
+                        {p.nombre + " (nube)"}
+                      </option>
+                    ))}
+                  </select>
+                  {modelosDisponibles.length === 0 && (
+                    <p className="mt-1.5 text-xs text-red-500">
+                      No se pudo conectar con Ollama en localhost:11434.
+                    </p>
+                  )}
+                </>
               )}
             </div>
 
@@ -410,32 +436,36 @@ export default function HomePage() {
                 Modelo para preguntas del sondeo
               </p>
               <p className="text-xs text-neutral-500 mb-3">
-                Se usa una vez por cada pregunta — un modelo más liviano acelera el sondeo.
+                Se llama una vez cada 3 preguntas (en lote) — un modelo más liviano
+                acelera el sondeo.
               </p>
               {cargandoModelos ? (
                 <p className="text-xs text-neutral-600">Cargando modelos...</p>
-              ) : modelosDisponibles.length === 0 ? (
-                <p className="text-xs text-red-500">
-                  No se pudo conectar con Ollama en localhost:11434.
-                </p>
               ) : (
-<select
-  value={modeloPreguntas}
-  onChange={(e) => guardarModeloPreguntas(e.target.value)}
-  className="w-full rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 transition-colors focus:border-neutral-600 focus:outline-none"
->
-  <option value="gemini-flash-latest">Gemini (nube) — gemini-flash-latest</option>
-  {modelosDisponibles.map((m) => (
-    <option key={m.nombre} value={m.nombre}>
-      {m.nombre}
-    </option>
-  ))}
-  {proveedores.map((p) => (
-    <option key={p.id} value={p.nombre}>
-      {p.nombre + " (nube)"}
-    </option>
-  ))}
-</select>
+                <>
+                  <select
+                    value={modeloPreguntas}
+                    onChange={(e) => guardarModeloPreguntas(e.target.value)}
+                    className="w-full rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 transition-colors focus:border-neutral-600 focus:outline-none"
+                  >
+                    <option value={MODELO_GEMINI}>Gemini (nube) — {MODELO_GEMINI}</option>
+                    {modelosDisponibles.map((m) => (
+                      <option key={m.nombre} value={m.nombre}>
+                        {m.nombre}
+                      </option>
+                    ))}
+                    {proveedores.map((p) => (
+                      <option key={p.id} value={p.nombre}>
+                        {p.nombre + " (nube)"}
+                      </option>
+                    ))}
+                  </select>
+                  {modelosDisponibles.length === 0 && (
+                    <p className="mt-1.5 text-xs text-red-500">
+                      No se pudo conectar con Ollama en localhost:11434.
+                    </p>
+                  )}
+                </>
               )}
             </div>
              <div className="mt-6">
@@ -480,6 +510,12 @@ export default function HomePage() {
                       />
                       <input
                         className="rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 placeholder:text-neutral-500 transition-colors focus:border-neutral-600 focus:outline-none"
+                        value={nuevoModelo}
+                        onChange={(e) => setNuevoModelo(e.target.value)}
+                        placeholder="Modelo de la API (ej. llama-3.1-8b-instant)"
+                      />
+                      <input
+                        className="rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 placeholder:text-neutral-500 transition-colors focus:border-neutral-600 focus:outline-none"
                         value={nuevaApiKey}
                         onChange={(e) => setNuevaApiKey(e.target.value)}
                         placeholder="API Key"
@@ -502,11 +538,14 @@ export default function HomePage() {
                               baseUrl: nuevaBaseUrl,
                               apiKey: nuevaApiKey,
                               formato: nuevoFormato,
+                              // Opcional: si se deja vacío se usa el modelo por defecto.
+                              modelo: nuevoModelo.trim() || undefined,
                             });
                             setProveedores(obtenerProveedores());
                             setNuevoNombre("");
                             setNuevaBaseUrl("");
                             setNuevaApiKey("");
+                            setNuevoModelo("");
                             setNuevoFormato("openai");
                             setMostrandoFormProveedor(false);
                           }}
@@ -560,8 +599,11 @@ export default function HomePage() {
                     onClick={() => router.push(`/sondeo/${s.id}`)}
                     className="group flex cursor-pointer items-center justify-between rounded-xl border border-neutral-800/60 bg-neutral-900/50 p-3 transition-colors duration-200 hover:border-neutral-700 hover:bg-neutral-900"
                   >
-                    <div className="flex flex-col">
-                      <span className="text-sm text-neutral-200">
+                    <div className="flex min-w-0 flex-col">
+                      <span className="truncate text-sm text-neutral-200">
+                        {s.topic}
+                      </span>
+                      <span className="text-xs text-neutral-500">
                         {formatearFecha(s.creadoEn)}
                       </span>
                       {s.completa ? (

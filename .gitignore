@@ -1,6 +1,6 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-.env.local  
+.env.local
 
 # dependencies
 /node_modules
@@ -42,16 +42,11 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# base de datos local
+# base de datos local (incluye -shm y -wal del modo WAL)
 *.db
 *.db-journal
-
-# scripts de prueba manual
-lib/seed-test.ts
-
-# base de datos local
-*.db
-*.db-journal
+*.db-shm
+*.db-wal
 
 # scripts de prueba manual
 lib/seed-test.ts

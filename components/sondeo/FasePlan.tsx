@@ -8,7 +8,7 @@ const MERMAID_CDN = "https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js";
 interface FasePlanProps {
   sesionId: number;
   feedback: string;
-  subtemasFallados: string[];
+  subtemasDebiles: string[];
   onVolver: () => void;
 }
 
@@ -31,24 +31,24 @@ function escaparEtiqueta(texto: string): string {
   return texto.replace(/"/g, "'");
 }
 
-function construirGrafo(subtemasFallados: string[]): string {
+function construirGrafo(subtemasDebiles: string[]): string {
   const lineas = ["graph TD", '  PLAN["Plan de refuerzo"]'];
-  subtemasFallados.forEach((subtema, indice) => {
+  subtemasDebiles.forEach((subtema, indice) => {
     lineas.push(`  N${indice}["${escaparEtiqueta(etiquetaSubtema(subtema))}"]`);
     lineas.push(`  PLAN --> N${indice}`);
   });
   return lineas.join("\n");
 }
 
-export default function FasePlan({ sesionId, feedback, subtemasFallados, onVolver }: FasePlanProps) {
+export default function FasePlan({ sesionId, feedback, subtemasDebiles, onVolver }: FasePlanProps) {
   const contenedorGrafoRef = useRef<HTMLDivElement>(null);
   const [errorMapa, setErrorMapa] = useState<string | null>(null);
 
-  const grafo = useMemo(() => construirGrafo(subtemasFallados), [subtemasFallados]);
+  const grafo = useMemo(() => construirGrafo(subtemasDebiles), [subtemasDebiles]);
   const idGrafo = `mapa-conceptual-${sesionId}`;
 
   useEffect(() => {
-    if (subtemasFallados.length === 0) return;
+    if (subtemasDebiles.length === 0) return;
     let cancelado = false;
 
     const renderizar = () => {
@@ -121,7 +121,7 @@ export default function FasePlan({ sesionId, feedback, subtemasFallados, onVolve
       cancelado = true;
       script.removeEventListener("load", renderizar);
     };
-  }, [subtemasFallados, grafo]);
+  }, [subtemasDebiles, grafo]);
 
   return (
     <div className="relative min-h-screen bg-neutral-950 text-neutral-100 px-8 py-12 overflow-hidden">
@@ -131,9 +131,9 @@ export default function FasePlan({ sesionId, feedback, subtemasFallados, onVolve
       <div className="relative max-w-xl mx-auto flex flex-col gap-8">
         <div className="flex items-center justify-between">
           <p className="text-xs uppercase tracking-[0.2em] text-neutral-600">Plan</p>
-          {subtemasFallados.length > 0 && (
+          {subtemasDebiles.length > 0 && (
             <span className="text-xs tabular-nums text-neutral-600">
-              {subtemasFallados.length} {subtemasFallados.length === 1 ? "subtema" : "subtemas"} a reforzar
+              {subtemasDebiles.length} {subtemasDebiles.length === 1 ? "subtema" : "subtemas"} a reforzar
             </span>
           )}
         </div>
@@ -153,11 +153,11 @@ export default function FasePlan({ sesionId, feedback, subtemasFallados, onVolve
             </span>
             <h2 className="text-sm font-semibold tracking-tight text-neutral-100">Subtemas a reforzar</h2>
           </div>
-          {subtemasFallados.length === 0 ? (
-            <p className="text-sm text-neutral-500">No fallaste ningún subtema. ¡Buen trabajo!</p>
+          {subtemasDebiles.length === 0 ? (
+            <p className="text-sm text-neutral-500">Dominaste todos los subtemas. ¡Buen trabajo!</p>
           ) : (
             <ul className="flex flex-col gap-2">
-              {subtemasFallados.map((subtema) => (
+              {subtemasDebiles.map((subtema) => (
                 <li
                   key={subtema}
                   className="flex items-center gap-3 rounded-xl border border-neutral-800/60 bg-neutral-950/40 px-4 py-3"
@@ -170,7 +170,7 @@ export default function FasePlan({ sesionId, feedback, subtemasFallados, onVolve
           )}
         </div>
 
-        {subtemasFallados.length > 0 && (
+        {subtemasDebiles.length > 0 && (
           <div className="animate-fade-in-up rounded-2xl border border-neutral-800/60 bg-neutral-900/50 p-6 shadow-[0_24px_48px_-24px_rgba(0,0,0,0.85)]">
             <div className="mb-4 flex items-center gap-2.5">
               <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-neutral-800 bg-neutral-950/60 text-neutral-400">

@@ -9,12 +9,8 @@ import {
   IconoEquis,
   IconoFlecha,
 } from "@/components/ui/Iconos";
-
-interface Pregunta {
-  pregunta: string;
-  opciones: string[];
-  indiceCorrecta: number;
-}
+import { proveedorDeModelo, type ProveedorNube } from "@/lib/proveedores";
+import type { ItemHistorial, Pregunta, ProgresoSondeo } from "@/lib/tipos";
 
 interface SiguientePreguntaResponse {
   completo: boolean;
@@ -23,9 +19,12 @@ interface SiguientePreguntaResponse {
   preguntaId?: number;
   pregunta?: Pregunta;
   feedback?: string;
+  subtemasDebiles?: string[];
   error?: string;
   respondidas?: number;
-  total?: number;
+  totalServibles?: number;
+  subtemasTotal?: number;
+  subtemasCubiertos?: number;
 }
 
 interface PreguntaEnCurso {
@@ -38,8 +37,17 @@ interface PreguntaEnCurso {
 
 interface FaseSondeoProps {
   sesionId: number;
-  onSondeoCompleto: (feedback: string, subtemasFallados: string[]) => void;
+  /** Respuestas ya registradas en el servidor, para reanudar al recargar la página. */
+  historialInicial?: ItemHistorial[];
+  onSondeoCompleto: (feedback: string, subtemasDebiles: string[]) => void;
 }
+
+const PROGRESO_INICIAL: ProgresoSondeo = {
+  respondidas: 0,
+  totalServibles: 0,
+  subtemasTotal: 0,
+  subtemasCubiertos: 0,
+};
 
 function barajar<T>(array: T[]): T[] {
   const copia = [...array];
@@ -65,21 +73,36 @@ function barajarPregunta(pregunta: Pregunta): Pregunta {
   };
 }
 
-// Deriva los subtemas débiles directamente del historial: nombres de subtema
-// únicos donde el usuario respondió al menos una vez de forma incorrecta.
-function calcularSubtemasFallados(historial: PreguntaEnCurso[]): string[] {
-  const fallados = historial
-    .filter(
-      (item) =>
-        item.opcionElegida !== null &&
-        item.opcionElegida !== item.pregunta.opciones[item.pregunta.indiceCorrecta]
-    )
-    .map((item) => item.subtemaNombre)
-    .filter((nombre) => nombre.trim() !== "");
-  return Array.from(new Set(fallados));
+/** Convierte el historial guardado en el servidor en el estado local del componente. */
+function historialLocalDe(historial: ItemHistorial[]): PreguntaEnCurso[] {
+  return historial.map((item) => ({
+    subtemaId: item.subtemaId,
+    subtemaNombre: item.subtemaNombre,
+    preguntaId: item.preguntaId,
+    pregunta: item.pregunta,
+    opcionElegida: item.opcionElegida,
+  }));
 }
 
-export default function FaseSondeo({ sesionId, onSondeoCompleto }: FaseSondeoProps) {
+/** La config del proveedor viaja en la query: el servidor no puede leer localStorage. */
+function agregarProveedorAParams(
+  params: URLSearchParams,
+  prefijo: string,
+  proveedor: ProveedorNube | null
+): void {
+  if (!proveedor) return;
+  params.set(`${prefijo}Nombre`, proveedor.nombre);
+  params.set(`${prefijo}BaseUrl`, proveedor.baseUrl);
+  params.set(`${prefijo}ApiKey`, proveedor.apiKey);
+  params.set(`${prefijo}Formato`, proveedor.formato);
+  if (proveedor.modelo) params.set(`${prefijo}Modelo`, proveedor.modelo);
+}
+
+export default function FaseSondeo({
+  sesionId,
+  historialInicial = [],
+  onSondeoCompleto,
+}: FaseSondeoProps) {
   const router = useRouter();
 
   const [cargandoInicial, setCargandoInicial] = useState(true);
@@ -87,8 +110,13 @@ export default function FaseSondeo({ sesionId, onSondeoCompleto }: FaseSondeoPro
   const [error, setError] = useState<string | null>(null);
   const [completo, setCompleto] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
-  const [historial, setHistorial] = useState<PreguntaEnCurso[]>([]);
-  const [conteoPreguntas, setConteoPreguntas] = useState({ respondidas: 0, total: 0 });
+  // Se arranca desde el historial guardado en el servidor: recargar la página ya no
+  // borra todo lo que se había respondido.
+  const [historial, setHistorial] = useState<PreguntaEnCurso[]>(() =>
+    historialLocalDe(historialInicial)
+  );
+  const [progreso, setProgreso] = useState<ProgresoSondeo>(PROGRESO_INICIAL);
+  const [subtemasDebiles, setSubtemasDebiles] = useState<string[]>([]);
 
   const finRef = useRef<HTMLDivElement>(null);
   const notificadoRef = useRef(false);
@@ -99,29 +127,43 @@ export default function FaseSondeo({ sesionId, onSondeoCompleto }: FaseSondeoPro
     try {
       const modeloPreguntas = localStorage.getItem("uselearn:modeloPreguntas") ?? "";
       const modeloPrincipal = localStorage.getItem("uselearn:modeloPrincipal") ?? "";
-      const proveedores: import("@/lib/proveedores").ProveedorNube[] = JSON.parse(
+      const proveedores = JSON.parse(
         localStorage.getItem("proveedoresNube") ?? "[]"
-      );
-      const proveedorSeleccionado = proveedores.find((p) =>
-        modeloPreguntas.toLowerCase().startsWith(p.nombre.toLowerCase())
-      );
+      ) as ProveedorNube[];
+
       const queryParams = new URLSearchParams({ sesionId: String(sesionId) });
       if (modeloPreguntas) queryParams.set("modeloPreguntas", modeloPreguntas);
       if (modeloPrincipal) queryParams.set("modeloPrincipal", modeloPrincipal);
-      if (proveedorSeleccionado) {
-        queryParams.set("proveedorNombre", proveedorSeleccionado.nombre);
-        queryParams.set("proveedorBaseUrl", proveedorSeleccionado.baseUrl);
-        queryParams.set("proveedorApiKey", proveedorSeleccionado.apiKey);
-        queryParams.set("proveedorFormato", proveedorSeleccionado.formato);
-      }
+      // Se mandan los dos: el del modelo de preguntas y el del modelo principal
+      // (el feedback final también puede salir de un proveedor de nube).
+      agregarProveedorAParams(
+        queryParams,
+        "proveedorPreguntas",
+        proveedorDeModelo(proveedores, modeloPreguntas)
+      );
+      agregarProveedorAParams(
+        queryParams,
+        "proveedorPrincipal",
+        proveedorDeModelo(proveedores, modeloPrincipal)
+      );
 
       const res = await fetch(`/api/sondeo/siguiente-pregunta?${queryParams.toString()}`);
       const data: SiguientePreguntaResponse = await res.json();
 
       if (estaCancelado?.()) return;
 
-      if (typeof data.respondidas === "number" && typeof data.total === "number") {
-        setConteoPreguntas({ respondidas: data.respondidas, total: data.total });
+      if (
+        typeof data.respondidas === "number" &&
+        typeof data.totalServibles === "number" &&
+        typeof data.subtemasTotal === "number" &&
+        typeof data.subtemasCubiertos === "number"
+      ) {
+        setProgreso({
+          respondidas: data.respondidas,
+          totalServibles: data.totalServibles,
+          subtemasTotal: data.subtemasTotal,
+          subtemasCubiertos: data.subtemasCubiertos,
+        });
       }
 
       if (data.error) {
@@ -132,6 +174,9 @@ export default function FaseSondeo({ sesionId, onSondeoCompleto }: FaseSondeoPro
       if (data.completo) {
         setCompleto(true);
         setFeedback(data.feedback ?? "");
+        // Llegan del servidor: calcularlos en el cliente hacía que al recargar la
+        // página el plan terminara siempre vacío ("no fallaste ningún subtema").
+        setSubtemasDebiles(data.subtemasDebiles ?? []);
       } else if (data.pregunta && data.subtemaId) {
         const preguntaConOpcionesBarajadas = barajarPregunta(data.pregunta);
         setHistorial((prev) =>
@@ -139,7 +184,13 @@ export default function FaseSondeo({ sesionId, onSondeoCompleto }: FaseSondeoPro
             ? prev
             : [
                 ...prev,
-                { subtemaId: data.subtemaId!, subtemaNombre: data.subtemaNombre ?? "", preguntaId: data.preguntaId!, pregunta: preguntaConOpcionesBarajadas, opcionElegida: null },
+                {
+                  subtemaId: data.subtemaId!,
+                  subtemaNombre: data.subtemaNombre ?? "",
+                  preguntaId: data.preguntaId!,
+                  pregunta: preguntaConOpcionesBarajadas,
+                  opcionElegida: null,
+                },
               ]
         );
       }
@@ -171,8 +222,8 @@ export default function FaseSondeo({ sesionId, onSondeoCompleto }: FaseSondeoPro
   useEffect(() => {
     if (!completo || notificadoRef.current) return;
     notificadoRef.current = true;
-    onSondeoCompleto(feedback ?? "", calcularSubtemasFallados(historial));
-  }, [completo, feedback, historial, onSondeoCompleto]);
+    onSondeoCompleto(feedback ?? "", subtemasDebiles);
+  }, [completo, feedback, subtemasDebiles, onSondeoCompleto]);
 
   function elegirOpcion(index: number, opcion: string) {
     setHistorial((prev) =>
@@ -185,12 +236,17 @@ export default function FaseSondeo({ sesionId, onSondeoCompleto }: FaseSondeoPro
   async function responderYAvanzar(index: number) {
     const item = historial[index];
     if (!item.opcionElegida) return;
-    const correcta = item.opcionElegida === item.pregunta.opciones[item.pregunta.indiceCorrecta];
+
+    // Se manda el texto de la opción elegida: el servidor recalcula si era correcta y
+    // lo guarda, que es la información que después alimenta el feedback y el plan.
     try {
       await fetch("/api/sondeo/responder", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subtemaId: item.subtemaId, correcta, preguntaId: item.preguntaId }),
+        body: JSON.stringify({
+          preguntaId: item.preguntaId,
+          opcionElegida: item.opcionElegida,
+        }),
       });
     } catch {
       // si falla el POST igual seguimos, no bloqueamos el flujo del usuario
@@ -198,7 +254,9 @@ export default function FaseSondeo({ sesionId, onSondeoCompleto }: FaseSondeoPro
     cargarSiguientePregunta();
   }
 
-  if (cargandoInicial) {
+  // Con historial restaurado ya hay algo para mostrar, así que no se tapa la pantalla
+  // con el spinner mientras el servidor prepara la pregunta siguiente.
+  if (cargandoInicial && historial.length === 0) {
     return (
       <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col items-center justify-center gap-4">
         <div className="h-6 w-6 rounded-full border-2 border-neutral-700 border-t-neutral-300 animate-spin" />
@@ -230,12 +288,34 @@ export default function FaseSondeo({ sesionId, onSondeoCompleto }: FaseSondeoPro
       <div className="pointer-events-none absolute inset-x-0 top-0 h-72 bg-[linear-gradient(180deg,rgba(255,255,255,0.035)_0%,rgba(255,255,255,0)_100%)]" />
 
       <div className="relative max-w-xl mx-auto flex flex-col gap-8">
-        <div className="flex items-center justify-between">
-          <p className="text-xs uppercase tracking-[0.2em] text-neutral-600">Sondeo</p>
-          {!completo && conteoPreguntas.total > 0 && (
-            <span className="text-xs tabular-nums text-neutral-600">
-              Pregunta {conteoPreguntas.respondidas + 1} de {conteoPreguntas.total}
-            </span>
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <p className="text-xs uppercase tracking-[0.2em] text-neutral-600">Sondeo</p>
+            {!completo && progreso.totalServibles > 0 && (
+              <span className="text-xs tabular-nums text-neutral-600">
+                Pregunta {Math.min(progreso.respondidas + 1, progreso.totalServibles)}
+              </span>
+            )}
+          </div>
+
+          {/* El progreso se mide por sub-temas dominados: el total de preguntas crece a
+              medida que se generan lotes, así que un "x de y" terminaba siempre mintiendo. */}
+          {!completo && progreso.subtemasTotal > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <div className="h-1 w-full overflow-hidden rounded-full bg-neutral-800">
+                <div
+                  className="h-full rounded-full bg-neutral-300 transition-all duration-500"
+                  style={{
+                    width: `${Math.round(
+                      (progreso.subtemasCubiertos / progreso.subtemasTotal) * 100
+                    )}%`,
+                  }}
+                />
+              </div>
+              <p className="text-xs tabular-nums text-neutral-600">
+                {progreso.subtemasCubiertos} de {progreso.subtemasTotal} subtemas dominados
+              </p>
+            </div>
           )}
         </div>
 
@@ -245,7 +325,7 @@ export default function FaseSondeo({ sesionId, onSondeoCompleto }: FaseSondeoPro
 
           return (
             <div
-              key={index}
+              key={item.preguntaId}
               className="animate-fade-in-up rounded-2xl border border-neutral-800/60 bg-neutral-900/50 p-8 shadow-[0_24px_48px_-24px_rgba(0,0,0,0.85)]"
             >
               <h2 className="mb-6 text-lg font-semibold tracking-tight text-neutral-100">{item.pregunta.pregunta}</h2>
