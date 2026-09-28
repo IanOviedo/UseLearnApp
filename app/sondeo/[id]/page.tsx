@@ -16,6 +16,8 @@ interface SiguientePreguntaResponse {
   pregunta?: Pregunta;
   feedback?: string;
   error?: string;
+  respondidas?: number;
+  total?: number;
 }
 
 interface PreguntaEnCurso {
@@ -60,6 +62,7 @@ export default function SondeoPage() {
   const [completo, setCompleto] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [historial, setHistorial] = useState<PreguntaEnCurso[]>([]);
+  const [conteoPreguntas, setConteoPreguntas] = useState({ respondidas: 0, total: 0 });
 
   const finRef = useRef<HTMLDivElement>(null);
 
@@ -89,6 +92,10 @@ export default function SondeoPage() {
       const data: SiguientePreguntaResponse = await res.json();
 
       if (estaCancelado?.()) return;
+
+      if (typeof data.respondidas === "number" && typeof data.total === "number") {
+        setConteoPreguntas({ respondidas: data.respondidas, total: data.total });
+      }
 
       if (data.error) {
         setError(data.error);
@@ -193,7 +200,7 @@ export default function SondeoPage() {
           <p className="text-xs uppercase tracking-[0.2em] text-neutral-600">Sondeo</p>
           {!completo && historial.length > 0 && (
             <span className="text-xs tabular-nums text-neutral-600">
-              Pregunta {historial.length}
+              Pregunta {conteoPreguntas.respondidas + 1}
             </span>
           )}
         </div>

@@ -203,6 +203,17 @@ function listarSesionesConEstado(): {
   });
 }
 
+function contarPreguntasSesion(sesionId: number): { respondidas: number, total: number } {
+  const row = db.prepare(
+    "SELECT COUNT(*) AS total, COALESCE(SUM(respondida), 0) AS respondidas FROM preguntas WHERE sesion_id = ?"
+  ).get(sesionId) as { total: number, respondidas: number } | undefined;
+
+  return {
+    respondidas: row?.respondidas ?? 0,
+    total: row?.total ?? 0,
+  };
+}
+
 const eliminarSesion = db.transaction((sesionId: number): void => {
   db.prepare("DELETE FROM respuestas WHERE pregunta_id IN (SELECT id FROM preguntas WHERE sesion_id = ?)").run(sesionId);
   db.prepare("DELETE FROM preguntas WHERE sesion_id = ?").run(sesionId);
@@ -212,5 +223,5 @@ const eliminarSesion = db.transaction((sesionId: number): void => {
 
 
 export default db;
-export { crearSesion, agregarSubtema, obtenerSubtemas, actualizarAciertos, obtenerSesion, elegirSiguienteSubtema, sondeoCompleto, guardarPregunta, obtenerPreguntasPrevias, obtenerPreguntasSinResponder, marcarPreguntaRespondida, guardarFeedbackFinal, listarSesionesConEstado, eliminarSesion };
+export { crearSesion, agregarSubtema, obtenerSubtemas, actualizarAciertos, obtenerSesion, elegirSiguienteSubtema, sondeoCompleto, guardarPregunta, obtenerPreguntasPrevias, obtenerPreguntasSinResponder, marcarPreguntaRespondida, guardarFeedbackFinal, listarSesionesConEstado, eliminarSesion, contarPreguntasSesion };
 

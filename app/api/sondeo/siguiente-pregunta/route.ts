@@ -7,6 +7,7 @@ import {
   obtenerPreguntasSinResponder,
   guardarPregunta,
   guardarFeedbackFinal,
+  contarPreguntasSesion,
 } from "@/lib/db";
 import { generarPregunta, generarLotePreguntas, generarFeedbackSondeo } from "@/lib/ollama";
 import type { ProveedorNube } from "@/lib/proveedores";
@@ -41,7 +42,8 @@ export async function GET(request: NextRequest) {
     if (sondeoCompleto(sesionId)) {
       const sesionExistente = obtenerSesion(sesionId);
       if (sesionExistente && sesionExistente.feedbackFinal !== null) {
-        return NextResponse.json({ completo: true, feedback: sesionExistente.feedbackFinal });
+        const conteo = contarPreguntasSesion(sesionId);
+        return NextResponse.json({ completo: true, feedback: sesionExistente.feedbackFinal, respondidas: conteo.respondidas, total: conteo.total });
       }
 
       const subtemas = obtenerSubtemas(sesionId);
@@ -55,7 +57,8 @@ export async function GET(request: NextRequest) {
 
       const feedback = await generarFeedbackSondeo(resultados, modeloPrincipal);
       guardarFeedbackFinal(sesionId, feedback);
-      return NextResponse.json({ completo: true, feedback });
+      const conteoCompleto = contarPreguntasSesion(sesionId);
+      return NextResponse.json({ completo: true, feedback, respondidas: conteoCompleto.respondidas, total: conteoCompleto.total });
     }
 
     const sesion = obtenerSesion(sesionId);
@@ -77,11 +80,14 @@ if (!sesion) {
 
     if (pendientes.length > 0) {
       const siguiente = pendientes[0];
+      const conteo = contarPreguntasSesion(sesionId);
       return NextResponse.json({
         completo: false,
         subtemaId: subtema.id,
         preguntaId: siguiente.id,
         pregunta: JSON.parse(siguiente.contenido),
+        respondidas: conteo.respondidas,
+        total: conteo.total,
       });
     }
 
@@ -91,11 +97,14 @@ if (!sesion) {
       guardarPregunta(sesionId, subtema.id, "sondeo", JSON.stringify(p), "multiple_choice")
     );
 
+    const conteo = contarPreguntasSesion(sesionId);
     return NextResponse.json({
       completo: false,
       subtemaId: subtema.id,
       preguntaId: idsGuardados[0],
       pregunta: lote[0],
+      respondidas: conteo.respondidas,
+      total: conteo.total,
     });
   } catch (error) {
     console.error("Error en siguiente-pregunta:", error);
