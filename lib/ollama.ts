@@ -31,7 +31,7 @@ async function llamarOllama(modelo: string, prompt: string, think: boolean = fal
 
 
 export async function extraerSubtemas(texto: string, modelo: string = "gemma4:26b"): Promise<string[]> {
-  const prompt = `Extract the key sub-topics/concepts from the following text. Respond with ONLY a JSON array of short strings, nothing else (example: ["useState básico", "useEffect y dependencias", "props vs state"]).
+  const prompt = `Extract the key sub-topics/concepts from the following text. Respond with ONLY a JSON array of short strings. Your answer must start with "[" and end with "]", with no text, explanations, backticks or code fences before or after (example: ["useState básico", "useEffect y dependencias", "props vs state"]).
 
 Text:
 ${texto}`;
@@ -87,20 +87,17 @@ ${textoOriginal}
 
 Generá UNA pregunta de opción múltiple sobre el sub-tema "${subtema}", basada estrictamente en el contenido del texto de arriba.
 
-Anterior a responder, pensá paso a paso (en texto plano, sin llaves { }):
-1. Redactá las 4 opciones.
-2. Para cada opción, decidí explícitamente si es verdadera o falsa según el texto, y por qué.
-3. Si la pregunta compara dos cosas (por ejemplo React vs Vanilla JavaScript, o dos conceptos distintos), revisá con cuidado a cuál de los dos le corresponde cada característica antes de decidir — es un error común confundir cuál de los dos hace qué.
-4. Recién ahí, elegí el índice de la opción que tu propio análisis marcó como verdadera.
-
-Después de ese razonamiento en texto plano, en una línea aparte escribí exactamente "RESPUESTA:" seguido ÚNICAMENTE del objeto JSON con esta forma exacta, nada más:
+Formato de salida obligatorio (una sola línea, sin razonar en voz alta):
+- La única línea válida de tu respuesta es exactamente "RESPUESTA:" seguido del objeto JSON, con esta forma exacta:
 {"pregunta": "texto de la pregunta", "opciones": ["opción A", "opción B", "opción C", "opción D"], "indiceCorrecta": 0}
+- No agregues texto, explicaciones, comentarios ni razonamiento antes ni después de esa línea. No uses backticks ni bloques de código: el JSON va en texto plano.
 
 ${bloqueHistorial}Reglas:
 - La pregunta y todas las opciones deben basarse solo en lo que dice el texto de estudio, no en conocimiento general de React.
 - Exactamente 4 opciones.
-- "indiceCorrecta" debe ser un número entero de 0 a 3, correspondiente a tu propio razonamiento del paso 4.
+- "indiceCorrecta" debe ser un número entero de 0 a 3: el índice (base 0) de la opción correcta dentro del array "opciones".
 - La pregunta debe evaluar comprensión real, no ser trivial.
+- Si la pregunta compara dos cosas (por ejemplo React vs Vanilla JavaScript, o dos conceptos distintos), verificá que cada característica corresponda al concepto correcto antes de escribir el JSON.
 - El array "opciones" debe tener EXACTAMENTE 4 elementos, todos con texto no vacío. No agregues elementos extra ni strings vacíos.`;
 }
 
@@ -113,8 +110,6 @@ function construirPromptLotePreguntas(
 Texto de estudio:
 ${textoOriginal}
 
-Para cada pregunta, pensá primero internamente cuál opción es la correcta antes de escribir el JSON.
-
 Reglas:
 - La pregunta y todas las opciones deben basarse solo en lo que dice el texto de estudio, no en conocimiento general de React.
 - Exactamente 4 opciones por pregunta.
@@ -123,10 +118,9 @@ Reglas:
 - El array "opciones" de cada pregunta debe tener EXACTAMENTE 4 elementos, todos con texto no vacío.
 - Las 3 preguntas deben cubrir aspectos DISTINTOS del subtema, sin reformular la misma idea.
 
-Respondé ÚNICAMENTE con un array JSON de exactamente 3 objetos, cada uno con esta forma exacta:
-{"pregunta": "...", "opciones": ["...", "...", "...", "..."], "indiceCorrecta": 0}
-
-No agregues texto antes ni después del array JSON.`;
+Respondé ÚNICAMENTE con un array JSON: empezás con "[" y terminás con "]". No agregues texto, explicaciones, comentarios ni razonamiento antes ni después, y no uses backticks ni bloques de código.
+El array debe tener exactamente 3 objetos, cada uno con esta forma exacta:
+[{"pregunta": "...", "opciones": ["...", "...", "...", "..."], "indiceCorrecta": 0}, {"pregunta": "...", "opciones": ["...", "...", "...", "..."], "indiceCorrecta": 0}, {"pregunta": "...", "opciones": ["...", "...", "...", "..."], "indiceCorrecta": 0}]`;
 }
 
 function limpiarOpcion(texto: string): string {
