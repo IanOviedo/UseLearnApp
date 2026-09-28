@@ -175,7 +175,14 @@ export default function SondeoPage() {
       <div className="pointer-events-none absolute -top-32 left-1/2 h-96 w-[42rem] -translate-x-1/2 rounded-full bg-indigo-500/[0.07] blur-3xl" />
 
       <div className="relative max-w-xl mx-auto flex flex-col gap-8">
-        <p className="text-xs uppercase tracking-[0.2em] text-neutral-600">Sondeo</p>
+        <div className="flex items-center justify-between">
+          <p className="text-xs uppercase tracking-[0.2em] text-neutral-600">Sondeo</p>
+          {!completo && historial.length > 0 && (
+            <span className="text-xs tabular-nums text-neutral-600">
+              Pregunta {historial.length}
+            </span>
+          )}
+        </div>
 
         {historial.map((item, index) => {
           const respondida = item.opcionElegida !== null;
