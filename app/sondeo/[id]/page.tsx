@@ -63,7 +63,7 @@ export default function SondeoPage() {
 
   const finRef = useRef<HTMLDivElement>(null);
 
-  const cargarSiguientePregunta = useCallback(async () => {
+  const cargarSiguientePregunta = useCallback(async (estaCancelado?: () => boolean) => {
     setCargandoSiguiente(true);
     setError(null);
     try {
@@ -88,6 +88,8 @@ export default function SondeoPage() {
       const res = await fetch(`/api/sondeo/siguiente-pregunta?${queryParams.toString()}`);
       const data: SiguientePreguntaResponse = await res.json();
 
+      if (estaCancelado?.()) return;
+
       if (data.error) {
         setError(data.error);
         return;
@@ -98,21 +100,33 @@ export default function SondeoPage() {
         setFeedback(data.feedback ?? "");
       } else if (data.pregunta && data.subtemaId) {
         const preguntaConOpcionesBarajadas = barajarPregunta(data.pregunta);
-        setHistorial((prev) => [
-          ...prev,
-          { subtemaId: data.subtemaId!, preguntaId: data.preguntaId!, pregunta: preguntaConOpcionesBarajadas, opcionElegida: null },
-        ]);
+        setHistorial((prev) =>
+          prev.some((p) => p.preguntaId === data.preguntaId)
+            ? prev
+            : [
+                ...prev,
+                { subtemaId: data.subtemaId!, preguntaId: data.preguntaId!, pregunta: preguntaConOpcionesBarajadas, opcionElegida: null },
+              ]
+        );
       }
     } catch {
+      if (estaCancelado?.()) return;
       setError("No se pudo conectar con el servidor.");
     } finally {
-      setCargandoInicial(false);
-      setCargandoSiguiente(false);
+      if (!estaCancelado?.()) {
+        setCargandoInicial(false);
+        setCargandoSiguiente(false);
+      }
     }
   }, [sesionId]);
 
   useEffect(() => {
-    if (sesionId) cargarSiguientePregunta();
+    if (!sesionId) return;
+    let cancelado = false;
+    cargarSiguientePregunta(() => cancelado);
+    return () => {
+      cancelado = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sesionId]);
 
