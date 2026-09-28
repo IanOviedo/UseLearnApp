@@ -1,5 +1,8 @@
 import Database from "better-sqlite3";
 
+// Cantidad de aciertos seguidos necesarios para considerar un subtema "cubierto".
+const ACIERTOS_PARA_CUBRIR = 1;
+
 const db = new Database("useLearn.db");
 
 db.exec(`CREATE TABLE IF NOT EXISTS sesiones (
@@ -80,7 +83,7 @@ function actualizarAciertos(subtemaId: number, correcta: boolean): void {
 
   if (correcta) {
     const newAciertos = row.aciertos_seguidos + 1;
-    const newCubierto = newAciertos >= 2 ? 1 : row.cubierto;
+    const newCubierto = newAciertos >= ACIERTOS_PARA_CUBRIR ? 1 : row.cubierto;
 
     db.prepare("UPDATE subtemas SET aciertos_seguidos = ?, cubierto = ? WHERE id = ?")
       .run(newAciertos, newCubierto, subtemaId);

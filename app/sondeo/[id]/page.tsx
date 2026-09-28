@@ -1,279 +1,40 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useCallback, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import FaseSondeo from "@/components/sondeo/FaseSondeo";
+import FasePlan from "@/components/sondeo/FasePlan";
 
-interface Pregunta {
-  pregunta: string;
-  opciones: string[];
-  indiceCorrecta: number;
-}
-
-interface SiguientePreguntaResponse {
-  completo: boolean;
-  subtemaId?: number;
-  preguntaId?: number;
-  pregunta?: Pregunta;
-  feedback?: string;
-  error?: string;
-  respondidas?: number;
-  total?: number;
-}
-
-interface PreguntaEnCurso {
-  subtemaId: number;
-  preguntaId: number;
-  pregunta: Pregunta;
-  opcionElegida: string | null;
-}
-
-function barajar<T>(array: T[]): T[] {
-  const copia = [...array];
-  for (let i = copia.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copia[i], copia[j]] = [copia[j], copia[i]];
-  }
-  return copia;
-}
-
-function barajarPregunta(pregunta: Pregunta): Pregunta {
-  const opcionesConFlag = pregunta.opciones.map((texto, i) => ({
-    texto,
-    esCorrecta: i === pregunta.indiceCorrecta,
-  }));
-  const barajadas = barajar(opcionesConFlag);
-  const nuevoIndice = barajadas.findIndex((o) => o.esCorrecta);
-
-  return {
-    ...pregunta,
-    opciones: barajadas.map((o) => o.texto),
-    indiceCorrecta: nuevoIndice,
-  };
-}
+type Fase = "sondeo" | "plan";
 
 export default function SondeoPage() {
   const params = useParams();
   const router = useRouter();
   const sesionId = Number(params.id);
 
-  const [cargandoInicial, setCargandoInicial] = useState(true);
-  const [cargandoSiguiente, setCargandoSiguiente] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [completo, setCompleto] = useState(false);
-  const [feedback, setFeedback] = useState<string | null>(null);
-  const [historial, setHistorial] = useState<PreguntaEnCurso[]>([]);
-  const [conteoPreguntas, setConteoPreguntas] = useState({ respondidas: 0, total: 0 });
+  const [fase, setFase] = useState<Fase>("sondeo");
+  const [feedback, setFeedback] = useState("");
+  const [subtemasFallados, setSubtemasFallados] = useState<string[]>([]);
 
-  const finRef = useRef<HTMLDivElement>(null);
-
-  const cargarSiguientePregunta = useCallback(async (estaCancelado?: () => boolean) => {
-    setCargandoSiguiente(true);
-    setError(null);
-    try {
-      const modeloPreguntas = localStorage.getItem("uselearn:modeloPreguntas") ?? "";
-      const modeloPrincipal = localStorage.getItem("uselearn:modeloPrincipal") ?? "";
-      const proveedores: import("@/lib/proveedores").ProveedorNube[] = JSON.parse(
-        localStorage.getItem("proveedoresNube") ?? "[]"
-      );
-      const proveedorSeleccionado = proveedores.find((p) =>
-        modeloPreguntas.toLowerCase().startsWith(p.nombre.toLowerCase())
-      );
-      const queryParams = new URLSearchParams({ sesionId: String(sesionId) });
-      if (modeloPreguntas) queryParams.set("modeloPreguntas", modeloPreguntas);
-      if (modeloPrincipal) queryParams.set("modeloPrincipal", modeloPrincipal);
-      if (proveedorSeleccionado) {
-        queryParams.set("proveedorNombre", proveedorSeleccionado.nombre);
-        queryParams.set("proveedorBaseUrl", proveedorSeleccionado.baseUrl);
-        queryParams.set("proveedorApiKey", proveedorSeleccionado.apiKey);
-        queryParams.set("proveedorFormato", proveedorSeleccionado.formato);
-      }
-
-      const res = await fetch(`/api/sondeo/siguiente-pregunta?${queryParams.toString()}`);
-      const data: SiguientePreguntaResponse = await res.json();
-
-      if (estaCancelado?.()) return;
-
-      if (typeof data.respondidas === "number" && typeof data.total === "number") {
-        setConteoPreguntas({ respondidas: data.respondidas, total: data.total });
-      }
-
-      if (data.error) {
-        setError(data.error);
-        return;
-      }
-
-      if (data.completo) {
-        setCompleto(true);
-        setFeedback(data.feedback ?? "");
-      } else if (data.pregunta && data.subtemaId) {
-        const preguntaConOpcionesBarajadas = barajarPregunta(data.pregunta);
-        setHistorial((prev) =>
-          prev.some((p) => p.preguntaId === data.preguntaId)
-            ? prev
-            : [
-                ...prev,
-                { subtemaId: data.subtemaId!, preguntaId: data.preguntaId!, pregunta: preguntaConOpcionesBarajadas, opcionElegida: null },
-              ]
-        );
-      }
-    } catch {
-      if (estaCancelado?.()) return;
-      setError("No se pudo conectar con el servidor.");
-    } finally {
-      if (!estaCancelado?.()) {
-        setCargandoInicial(false);
-        setCargandoSiguiente(false);
-      }
-    }
-  }, [sesionId]);
-
-  useEffect(() => {
-    if (!sesionId) return;
-    let cancelado = false;
-    cargarSiguientePregunta(() => cancelado);
-    return () => {
-      cancelado = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sesionId]);
-
-  useEffect(() => {
-    finRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [historial.length, completo]);
-
-  function elegirOpcion(index: number, opcion: string) {
-    setHistorial((prev) =>
-      prev.map((item, i) =>
-        i === index && item.opcionElegida === null ? { ...item, opcionElegida: opcion } : item
-      )
-    );
-  }
-
-  async function responderYAvanzar(index: number) {
-    const item = historial[index];
-    if (!item.opcionElegida) return;
-    const correcta = item.opcionElegida === item.pregunta.opciones[item.pregunta.indiceCorrecta];
-    try {
-      await fetch("/api/sondeo/responder", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subtemaId: item.subtemaId, correcta, preguntaId: item.preguntaId }),
-      });
-    } catch {
-      // si falla el POST igual seguimos, no bloqueamos el flujo del usuario
-    }
-    cargarSiguientePregunta();
-  }
-
-  if (cargandoInicial) {
-    return (
-      <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col items-center justify-center gap-4">
-        <div className="h-6 w-6 rounded-full border-2 border-neutral-700 border-t-neutral-300 animate-spin" />
-        <p className="text-sm text-neutral-500">Cargando pregunta...</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col items-center justify-center gap-4">
-        <div className="rounded-2xl border border-red-500/20 bg-red-500/[0.06] px-8 py-6">
-          <p className="text-sm text-red-400">{error}</p>
-        </div>
-        <button
-          onClick={() => router.push("/")}
-          className="rounded-full bg-neutral-100 text-neutral-900 px-5 py-2 font-medium transition-all duration-300 hover:bg-white hover:shadow-lg"
-        >
-          Volver al inicio
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="relative min-h-screen bg-neutral-950 text-neutral-100 px-8 py-12 overflow-hidden">
-      {/* Glow sutil de fondo */}
-      <div className="pointer-events-none absolute -top-32 left-1/2 h-96 w-[42rem] -translate-x-1/2 rounded-full bg-indigo-500/[0.07] blur-3xl" />
-
-      <div className="relative max-w-xl mx-auto flex flex-col gap-8">
-        <div className="flex items-center justify-between">
-          <p className="text-xs uppercase tracking-[0.2em] text-neutral-600">Sondeo</p>
-          {!completo && historial.length > 0 && (
-            <span className="text-xs tabular-nums text-neutral-600">
-              Pregunta {conteoPreguntas.respondidas + 1}
-            </span>
-          )}
-        </div>
-
-        {historial.map((item, index) => {
-          const respondida = item.opcionElegida !== null;
-          const esUltimaActiva = index === historial.length - 1 && !completo;
-
-          return (
-            <div
-              key={index}
-              className="animate-fade-in-up rounded-2xl border border-white/[0.06] bg-neutral-900/40 p-8 shadow-[0_24px_48px_-24px_rgba(0,0,0,0.8)]"
-            >
-              <h2 className="text-xl font-semibold tracking-tight mb-6">{item.pregunta.pregunta}</h2>
-
-              <div className="flex flex-col gap-3">
-                {item.pregunta.opciones.map((opcion, opcionIndex) => {
-                  const esElegida = item.opcionElegida === opcion;
-                  const esCorrecta = opcion === item.pregunta.opciones[item.pregunta.indiceCorrecta];
-                  let estilos = "border-neutral-800 bg-neutral-950/40 hover:border-neutral-600 hover:bg-neutral-900/70";
-
-                  if (respondida) {
-                    if (esCorrecta) {
-                      estilos = "border-green-500 bg-green-500/10 text-green-400";
-                    } else if (esElegida) {
-                      estilos = "border-red-500 bg-red-500/10 text-red-400";
-                    } else {
-                      estilos = "border-neutral-800 opacity-50";
-                    }
-                  }
-
-                  return (
-                    <button
-                      key={opcionIndex}
-                      onClick={() => elegirOpcion(index, opcion)}
-                      disabled={respondida}
-                      className={`text-left rounded-xl border px-4 py-3.5 transition-all duration-200 disabled:cursor-default ${estilos}`}
-                    >
-                      {opcion}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {respondida && esUltimaActiva && (
-                <button
-                  onClick={() => responderYAvanzar(index)}
-                  disabled={cargandoSiguiente}
-                  className="mt-6 w-full rounded-full bg-neutral-100 text-neutral-900 px-5 py-3 font-medium transition-all duration-300 hover:bg-white hover:shadow-lg disabled:opacity-50"
-                >
-                  {cargandoSiguiente ? "Cargando..." : "Siguiente →"}
-                </button>
-              )}
-            </div>
-          );
-        })}
-
-        {completo && (
-          <div className="animate-fade-in-up rounded-2xl border border-white/[0.06] bg-neutral-900/40 p-8 text-center flex flex-col items-center gap-6 shadow-[0_24px_48px_-24px_rgba(0,0,0,0.8)]">
-            <span className="flex h-12 w-12 items-center justify-center rounded-full border border-emerald-500/30 bg-emerald-500/10 text-xl text-emerald-400">✓</span>
-            <h1 className="text-2xl font-bold tracking-tight">¡Sondeo completo!</h1>
-            <p className="text-neutral-400 whitespace-pre-wrap leading-relaxed">{feedback}</p>
-            <button
-              onClick={() => router.push("/")}
-              className="rounded-full bg-neutral-100 text-neutral-900 px-5 py-2 font-medium transition-all duration-300 hover:bg-white hover:shadow-lg"
-            >
-              Volver al inicio
-            </button>
-          </div>
-        )}
-
-        <div ref={finRef} />
-      </div>
-    </div>
+  const manejarSondeoCompleto = useCallback(
+    (feedbackFinal: string, subtemasDebiles: string[]) => {
+      setFeedback(feedbackFinal);
+      setSubtemasFallados(subtemasDebiles);
+      setFase("plan");
+    },
+    []
   );
+
+  if (fase === "plan") {
+    return (
+      <FasePlan
+        sesionId={sesionId}
+        feedback={feedback}
+        subtemasFallados={subtemasFallados}
+        onVolver={() => router.push("/")}
+      />
+    );
+  }
+
+  return <FaseSondeo sesionId={sesionId} onSondeoCompleto={manejarSondeoCompleto} />;
 }

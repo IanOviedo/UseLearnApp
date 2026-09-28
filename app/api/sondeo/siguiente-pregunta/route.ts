@@ -12,6 +12,10 @@ import {
 import { generarPregunta, generarLotePreguntas, generarFeedbackSondeo } from "@/lib/ollama";
 import type { ProveedorNube } from "@/lib/proveedores";
 
+// Red de seguridad: tope de preguntas respondidas por sesión. Al alcanzarlo, el
+// sondeo se cierra aunque queden subtemas sin cubrir.
+const MAX_PREGUNTAS_SESION = 20;
+
 export async function GET(request: NextRequest) {
   const sesionId = Number(request.nextUrl.searchParams.get("sesionId"));
   const modeloPreguntas = request.nextUrl.searchParams.get("modeloPreguntas") ?? undefined;
@@ -39,10 +43,11 @@ export async function GET(request: NextRequest) {
     );
   }
   try {
-    if (sondeoCompleto(sesionId)) {
+    const conteo = contarPreguntasSesion(sesionId);
+
+    if (sondeoCompleto(sesionId) || conteo.respondidas >= MAX_PREGUNTAS_SESION) {
       const sesionExistente = obtenerSesion(sesionId);
       if (sesionExistente && sesionExistente.feedbackFinal !== null) {
-        const conteo = contarPreguntasSesion(sesionId);
         return NextResponse.json({ completo: true, feedback: sesionExistente.feedbackFinal, respondidas: conteo.respondidas, total: conteo.total });
       }
 
@@ -57,8 +62,7 @@ export async function GET(request: NextRequest) {
 
       const feedback = await generarFeedbackSondeo(resultados, modeloPrincipal);
       guardarFeedbackFinal(sesionId, feedback);
-      const conteoCompleto = contarPreguntasSesion(sesionId);
-      return NextResponse.json({ completo: true, feedback, respondidas: conteoCompleto.respondidas, total: conteoCompleto.total });
+      return NextResponse.json({ completo: true, feedback, respondidas: conteo.respondidas, total: conteo.total });
     }
 
     const sesion = obtenerSesion(sesionId);
@@ -80,10 +84,10 @@ if (!sesion) {
 
     if (pendientes.length > 0) {
       const siguiente = pendientes[0];
-      const conteo = contarPreguntasSesion(sesionId);
       return NextResponse.json({
         completo: false,
         subtemaId: subtema.id,
+        subtemaNombre: subtema.nombre,
         preguntaId: siguiente.id,
         pregunta: JSON.parse(siguiente.contenido),
         respondidas: conteo.respondidas,
@@ -97,14 +101,17 @@ if (!sesion) {
       guardarPregunta(sesionId, subtema.id, "sondeo", JSON.stringify(p), "multiple_choice")
     );
 
-    const conteo = contarPreguntasSesion(sesionId);
+    // El lote recién se insertó: se relee el conteo para que el total que muestra
+    // el contador x/y del cliente incluya esas preguntas nuevas.
+    const conteoTrasLote = contarPreguntasSesion(sesionId);
     return NextResponse.json({
       completo: false,
       subtemaId: subtema.id,
+      subtemaNombre: subtema.nombre,
       preguntaId: idsGuardados[0],
       pregunta: lote[0],
-      respondidas: conteo.respondidas,
-      total: conteo.total,
+      respondidas: conteoTrasLote.respondidas,
+      total: conteoTrasLote.total,
     });
   } catch (error) {
     console.error("Error en siguiente-pregunta:", error);

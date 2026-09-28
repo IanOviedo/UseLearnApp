@@ -3,6 +3,21 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { obtenerProveedores, eliminarProveedor, agregarProveedor, type ProveedorNube } from "@/lib/proveedores";
+import {
+  IconoAdjuntar,
+  IconoAjustes,
+  IconoAlerta,
+  IconoCargador,
+  IconoCerrar,
+  IconoChevron,
+  IconoCheck,
+  IconoDestello,
+  IconoDocumento,
+  IconoEliminar,
+  IconoFlecha,
+  IconoHistorial,
+  IconoPlay,
+} from "@/components/ui/Iconos";
 
 
 type EstadoQuiz = "idle" | "generando" | "listo";
@@ -202,32 +217,26 @@ export default function HomePage() {
 
   return (
     <div className="relative min-h-screen bg-neutral-950 text-neutral-100 overflow-hidden">
-      {/* Fondo decorativo */}
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute -left-32 top-1/3 h-96 w-96 rounded-full bg-indigo-500/10 blur-3xl animate-blob-slow" />
-        <div className="absolute -right-24 top-10 h-80 w-80 rounded-full bg-sky-500/10 blur-3xl animate-blob-slower" />
-        <div className="absolute left-1/3 bottom-0 h-72 w-72 rounded-full bg-violet-500/10 blur-3xl animate-blob-slow" />
-        <div className="absolute inset-0 bg-[radial-gradient(rgba(255,255,255,0.05)_1px,transparent_1px)] [background-size:26px_26px] [mask-image:radial-gradient(ellipse_at_top,black,transparent_75%)]" />
-      </div>
+      {/* Fondo uniforme y estático (sin animaciones) */}
+      <div className="pointer-events-none absolute inset-0 bg-neutral-950" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-80 bg-[linear-gradient(180deg,rgba(255,255,255,0.035)_0%,rgba(255,255,255,0)_100%)]" />
 
       {/* Header */}
-      <header className="relative z-10 flex items-center justify-between px-8 py-4 border-b border-white/5">
-        <span className="text-sm font-semibold tracking-[0.25em] text-neutral-200">USELEARN</span>
-        <div className="flex items-center gap-3 relative">
-
-          <button
-            onClick={abrirAjustes}
-            className="rounded-full border border-neutral-800 bg-neutral-900 h-8 w-8 flex items-center justify-center text-neutral-400 transition-all duration-300 hover:border-neutral-600 hover:text-neutral-200 hover:rotate-45"
-          >
-            ⚙
-          </button>
-        </div>
+      <header className="relative z-10 flex items-center justify-between border-b border-neutral-800/60 bg-neutral-950/80 px-8 py-4 backdrop-blur-sm">
+        <span className="text-sm font-semibold tracking-[0.28em] text-neutral-100">USELEARN</span>
+        <button
+          onClick={abrirAjustes}
+          title="Ajustes"
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-neutral-800 bg-neutral-900/60 text-neutral-400 transition-colors duration-200 hover:border-neutral-600 hover:bg-neutral-800/60 hover:text-neutral-100"
+        >
+          <IconoAjustes className="h-4 w-4" />
+        </button>
       </header>
 
       {/* Body */}
       <main className="relative z-10 max-w-5xl mx-auto px-8 py-12">
-        <p className="animate-fade-in-up text-xs uppercase tracking-[0.25em] text-neutral-600 mb-3">— TU CAMINO DE APRENDIZAJE</p>
-        <h1 className="animate-fade-in-up [animation-delay:70ms] text-4xl font-bold tracking-tight mb-3 bg-gradient-to-br from-white via-neutral-200 to-neutral-500 bg-clip-text text-transparent">Bienvenido de nuevo</h1>
+        <p className="animate-fade-in-up text-xs uppercase tracking-[0.25em] text-neutral-500 mb-3">Tu camino de aprendizaje</p>
+        <h1 className="animate-fade-in-up [animation-delay:70ms] text-4xl font-bold tracking-tight mb-3 bg-gradient-to-br from-white via-neutral-200 to-neutral-400 bg-clip-text text-transparent">Bienvenido de nuevo</h1>
         <p className="animate-fade-in-up [animation-delay:140ms] text-neutral-400 leading-relaxed mb-10">
           Aquí es donde comienzas, exploras y practicas.
           <br />
@@ -236,10 +245,12 @@ export default function HomePage() {
 
         <div className="grid grid-cols-3 gap-6">
           {/* Textarea */}
-          <div className="col-span-2 rounded-2xl border border-white/[0.06] bg-neutral-900/40 p-6 flex flex-col min-h-[320px] shadow-[0_24px_48px_-24px_rgba(0,0,0,0.8)]">
-            <div className="flex items-center gap-2 text-neutral-300 mb-4">
-              <span>📄</span>
-              <span className="font-medium">Pega tus notas o lo que sea...</span>
+          <div className="col-span-2 flex min-h-[320px] flex-col rounded-2xl border border-neutral-800/60 bg-neutral-900/50 p-6 shadow-[0_24px_48px_-24px_rgba(0,0,0,0.85)]">
+            <div className="mb-4 flex items-center gap-2.5">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-neutral-800 bg-neutral-950/60 text-neutral-400">
+                <IconoDocumento className="h-4 w-4" />
+              </span>
+              <span className="text-sm font-medium text-neutral-200">Pega tus notas o lo que sea...</span>
             </div>
             <textarea
               value={texto}
@@ -248,20 +259,22 @@ export default function HomePage() {
               placeholder="Puedes pegar un texto, una pregunta, una imagen o lo que quieras revisar."
               className="notas-textarea flex-1 resize-none bg-transparent text-sm text-neutral-300 placeholder:text-neutral-600 focus:outline-none disabled:opacity-50"
             />
-            <div className="self-start mt-4 flex items-center gap-2">
+            <div className="mt-4 flex items-center gap-2 self-start">
               <button
                 onClick={() => setTexto("")}
                 disabled={estadoQuiz === "generando"}
-                className="flex items-center gap-2 rounded-full border border-neutral-800 px-4 py-1.5 text-sm text-neutral-400 transition-all duration-300 hover:border-neutral-600 hover:text-neutral-200 disabled:opacity-40"
+                className="flex items-center gap-2 rounded-full border border-neutral-800 px-4 py-1.5 text-sm text-neutral-400 transition-colors duration-200 hover:border-neutral-600 hover:bg-neutral-800/40 hover:text-neutral-100 disabled:opacity-40"
               >
-                ⤢ Limpiar texto
+                <IconoEliminar className="h-3.5 w-3.5" />
+                Limpiar texto
               </button>
               <label
-                className={`flex items-center justify-center h-8 w-8 rounded-full border border-neutral-800 text-neutral-400 transition-all duration-300 hover:border-neutral-600 hover:text-neutral-200 cursor-pointer ${
-                  subiendoArchivo || estadoQuiz === "generando" ? "opacity-40 pointer-events-none" : ""
+                title="Adjuntar archivo (.txt, .md, .pdf)"
+                className={`flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border border-neutral-800 text-neutral-400 transition-colors duration-200 hover:border-neutral-600 hover:bg-neutral-800/40 hover:text-neutral-100 ${
+                  subiendoArchivo || estadoQuiz === "generando" ? "pointer-events-none opacity-40" : ""
                 }`}
               >
-                +
+                <IconoAdjuntar className="h-4 w-4" />
                 <input
                   type="file"
                   accept=".txt,.md,.pdf"
@@ -277,41 +290,66 @@ export default function HomePage() {
           </div>
 
           {/* Quiz — copy dinámico según estadoQuiz */}
-          <div className="rounded-2xl border border-white/[0.06] bg-neutral-900/40 p-6 flex flex-col shadow-[0_24px_48px_-24px_rgba(0,0,0,0.8)]">
-            <div className="flex items-center gap-2 mb-1">
-              <span>✦</span>
-              <span className="font-semibold">{COPY_POR_ESTADO[estadoQuiz].titulo}</span>
+          <div className="flex flex-col rounded-2xl border border-neutral-800/60 bg-neutral-900/50 p-6 shadow-[0_24px_48px_-24px_rgba(0,0,0,0.85)]">
+            <div className="mb-1 flex items-center gap-2.5">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-neutral-800 bg-neutral-950/60 text-neutral-400">
+                <IconoDestello className="h-4 w-4" />
+              </span>
+              <span className="text-sm font-semibold text-neutral-100">{COPY_POR_ESTADO[estadoQuiz].titulo}</span>
             </div>
-            <p className="text-sm text-neutral-500 mb-6">{COPY_POR_ESTADO[estadoQuiz].subtitulo}</p>
+            <p className="mb-6 text-sm text-neutral-500">{COPY_POR_ESTADO[estadoQuiz].subtitulo}</p>
 
             <button
               onClick={estadoQuiz === "listo" ? pasarAlSondeo : generarQuiz}
               disabled={!texto.trim() || estadoQuiz === "generando"}
-              className={`flex items-center justify-between rounded-full px-5 py-3 font-medium transition-all duration-300 ${
+              className={`flex items-center justify-between gap-3 rounded-full px-5 py-3 text-sm font-medium transition-all duration-300 ${
                 estadoQuiz === "generando"
-                  ? "bg-neutral-800/70 text-neutral-500 cursor-not-allowed"
-                  : "bg-neutral-100 text-neutral-900 hover:bg-white hover:shadow-lg hover:-translate-y-0.5 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none"
+                  ? "cursor-not-allowed bg-neutral-800/60 text-neutral-500"
+                  : "bg-neutral-100 text-neutral-900 hover:bg-white hover:shadow-lg hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0 disabled:hover:shadow-none"
               }`}
             >
               <span className="flex items-center gap-2">
-                {estadoQuiz === "generando" && "⏳ Generando quiz..."}
-                {estadoQuiz === "listo" && "▶ Pasar al sondeo"}
-                {estadoQuiz === "idle" && "✦ Generar quiz"}
+                {estadoQuiz === "generando" && (
+                  <>
+                    <IconoCargador className="h-4 w-4" />
+                    Generando quiz...
+                  </>
+                )}
+                {estadoQuiz === "listo" && (
+                  <>
+                    <IconoPlay className="h-4 w-4" />
+                    Pasar al sondeo
+                  </>
+                )}
+                {estadoQuiz === "idle" && (
+                  <>
+                    <IconoDestello className="h-4 w-4" />
+                    Generar quiz
+                  </>
+                )}
               </span>
-              {estadoQuiz !== "generando" && <span className="ml-2">→</span>}
+              {estadoQuiz !== "generando" && <IconoFlecha className="h-4 w-4 shrink-0" />}
             </button>
 
-            {error && <p className="text-red-400 text-xs mt-3">{error}</p>}
+            {error && (
+              <p className="mt-3 flex items-start gap-1.5 text-xs text-red-400">
+                <IconoAlerta className="mt-px h-3.5 w-3.5 shrink-0" />
+                <span>{error}</span>
+              </p>
+            )}
           </div>
         </div>
 
         {/* Sesiones pasadas */}
         <button
           onClick={abrirSesiones}
-          className="group mt-6 w-full rounded-2xl border border-white/[0.06] bg-neutral-900/40 p-6 flex items-center gap-3 text-neutral-400 text-left transition-all duration-300 hover:border-white/10 hover:bg-neutral-900/70 shadow-[0_24px_48px_-24px_rgba(0,0,0,0.8)]"
+          className="group mt-6 flex w-full items-center gap-3 rounded-2xl border border-neutral-800/60 bg-neutral-900/50 p-5 text-left transition-colors duration-200 hover:border-neutral-700 hover:bg-neutral-900/80 shadow-[0_24px_48px_-24px_rgba(0,0,0,0.85)]"
         >
-          <span className="text-xl transition-transform duration-300 group-hover:scale-110">🕓</span>
-          <span className="font-medium text-neutral-200">Sesiones pasadas</span>
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-neutral-800 bg-neutral-950/60 text-neutral-400 transition-colors group-hover:text-neutral-200">
+            <IconoHistorial className="h-4 w-4" />
+          </span>
+          <span className="flex-1 text-sm font-medium text-neutral-200">Sesiones pasadas</span>
+          <IconoChevron className="h-4 w-4 text-neutral-600 transition-colors group-hover:text-neutral-300" />
         </button>
       </main>
 
@@ -325,13 +363,17 @@ export default function HomePage() {
             className="animate-modal-in w-full max-w-lg rounded-2xl border border-white/10 bg-neutral-950/95 backdrop-blur-xl p-6 max-h-[80vh] overflow-y-auto shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-lg font-semibold tracking-tight">Ajustes</h2>
+            <div className="mb-6 flex items-center justify-between">
+              <h2 className="flex items-center gap-2 text-base font-semibold tracking-tight text-neutral-100">
+                <IconoAjustes className="h-4 w-4 text-neutral-500" />
+                Ajustes
+              </h2>
               <button
                 onClick={() => setAjustesModalAbierto(false)}
-                className="text-neutral-500 hover:text-neutral-200 text-xl leading-none w-8 h-8 flex items-center justify-center rounded-full transition-colors hover:bg-white/5"
+                title="Cerrar"
+                className="flex h-8 w-8 items-center justify-center rounded-full text-neutral-500 transition-colors hover:bg-neutral-800/60 hover:text-neutral-100"
               >
-                ×
+                <IconoCerrar className="h-4 w-4" />
               </button>
             </div>
 
@@ -382,7 +424,7 @@ export default function HomePage() {
   onChange={(e) => guardarModeloPreguntas(e.target.value)}
   className="w-full rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 transition-colors focus:border-neutral-600 focus:outline-none"
 >
-  <option value="gemini-flash-latest">✦ Gemini (nube) — gemini-flash-latest</option>
+  <option value="gemini-flash-latest">Gemini (nube) — gemini-flash-latest</option>
   {modelosDisponibles.map((m) => (
     <option key={m.nombre} value={m.nombre}>
       {m.nombre}
@@ -390,20 +432,20 @@ export default function HomePage() {
   ))}
   {proveedores.map((p) => (
     <option key={p.id} value={p.nombre}>
-      {"✦ " + p.nombre + " (nube)"}
+      {p.nombre + " (nube)"}
     </option>
   ))}
 </select>
               )}
             </div>
              <div className="mt-6">
-               <h3 className="text-sm font-medium text-neutral-200 tracking-tight mb-2">Proveedores de nube configurados</h3>
+               <h3 className="mb-2 text-sm font-medium tracking-tight text-neutral-200">Proveedores de nube configurados</h3>
                {proveedores.length === 0 ? (
                  <p className="text-xs text-neutral-500">No hay proveedores configurados</p>
                ) : (
                  <div className="space-y-2">
                    {proveedores.map((p) => (
-                     <div key={p.id} className="flex items-center justify-between rounded-xl bg-neutral-900/60 p-2.5 text-xs border border-neutral-900 transition-colors hover:border-neutral-800">
+                     <div key={p.id} className="flex items-center justify-between rounded-xl border border-neutral-800/60 bg-neutral-900/60 p-2.5 text-xs transition-colors hover:border-neutral-700">
                        <div className="flex flex-col">
                          <span className="text-neutral-200">{p.nombre}</span>
                          <span className="text-neutral-500">{`••••••${p.apiKey.slice(-4)}`}</span>
@@ -413,7 +455,7 @@ export default function HomePage() {
                            eliminarProveedor(p.id);
                            setProveedores(obtenerProveedores());
                          }}
-                         className="text-red-400 hover:text-red-300 transition-colors"
+                         className="flex items-center gap-1.5 rounded-full px-2 py-1 text-red-400 transition-colors hover:bg-red-500/10 hover:text-red-300"
                        >
                          Eliminar
                        </button>
@@ -421,29 +463,29 @@ export default function HomePage() {
                    ))}
                  </div>
                )}
-                  <button onClick={() => setMostrandoFormProveedor(true)} className="mt-3 self-start rounded-full border border-neutral-800 px-4 py-1.5 text-xs text-neutral-300 transition-all duration-300 hover:border-neutral-600 hover:text-neutral-200">+ Agregar proveedor</button>
+                  <button onClick={() => setMostrandoFormProveedor(true)} className="mt-3 self-start rounded-full border border-neutral-800 px-4 py-1.5 text-xs text-neutral-300 transition-colors duration-200 hover:border-neutral-600 hover:bg-neutral-800/40 hover:text-neutral-100">+ Agregar proveedor</button>
                   {mostrandoFormProveedor && (
                     <div className="mt-2 flex flex-col gap-2">
                       <input
-                        className="rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 placeholder-neutral-500 transition-colors focus:border-neutral-600 focus:outline-none"
+                        className="rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 placeholder:text-neutral-500 transition-colors focus:border-neutral-600 focus:outline-none"
                         value={nuevoNombre}
                         onChange={(e) => setNuevoNombre(e.target.value)}
                         placeholder="Nombre (ej. Groq)"
                       />
                       <input
-                        className="rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 placeholder-neutral-500 transition-colors focus:border-neutral-600 focus:outline-none"
+                        className="rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 placeholder:text-neutral-500 transition-colors focus:border-neutral-600 focus:outline-none"
                         value={nuevaBaseUrl}
                         onChange={(e) => setNuevaBaseUrl(e.target.value)}
                         placeholder="URL base de la API"
                       />
                       <input
-                        className="rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 placeholder-neutral-500 transition-colors focus:border-neutral-600 focus:outline-none"
+                        className="rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 placeholder:text-neutral-500 transition-colors focus:border-neutral-600 focus:outline-none"
                         value={nuevaApiKey}
                         onChange={(e) => setNuevaApiKey(e.target.value)}
                         placeholder="API Key"
                       />
                       <select
-                        className="rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 placeholder-neutral-500 transition-colors focus:border-neutral-600 focus:outline-none"
+                        className="rounded-lg bg-neutral-900 border border-neutral-800 px-3 py-2 text-sm text-neutral-200 placeholder:text-neutral-500 transition-colors focus:border-neutral-600 focus:outline-none"
                         value={nuevoFormato}
                         onChange={(e) => setNuevoFormato(e.target.value as "openai" | "gemini-nativo")}
                       >
@@ -471,7 +513,7 @@ export default function HomePage() {
                         >
                           Guardar
                         </button>
-                        <button onClick={() => setMostrandoFormProveedor(false)} className="rounded-full border border-neutral-800 px-4 py-1.5 text-xs text-neutral-400 transition-all duration-300 hover:border-neutral-600 hover:text-neutral-200">
+                        <button onClick={() => setMostrandoFormProveedor(false)} className="rounded-full border border-neutral-800 px-4 py-1.5 text-xs text-neutral-400 transition-colors duration-200 hover:border-neutral-600 hover:bg-neutral-800/40 hover:text-neutral-100">
                           Cancelar
                         </button>
                       </div>
@@ -494,13 +536,17 @@ export default function HomePage() {
             className="animate-modal-in w-full max-w-lg rounded-2xl border border-white/10 bg-neutral-950/95 backdrop-blur-xl p-6 max-h-[80vh] overflow-y-auto shadow-2xl [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-neutral-700 [&::-webkit-scrollbar-thumb]:rounded-full"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-lg font-semibold tracking-tight">Sesiones pasadas</h2>
+            <div className="mb-6 flex items-center justify-between">
+              <h2 className="flex items-center gap-2 text-base font-semibold tracking-tight text-neutral-100">
+                <IconoHistorial className="h-4 w-4 text-neutral-500" />
+                Sesiones pasadas
+              </h2>
               <button
                 onClick={() => setSesionesModalAbierto(false)}
-                className="text-neutral-500 hover:text-neutral-200 text-xl leading-none w-8 h-8 flex items-center justify-center rounded-full transition-colors hover:bg-white/5"
+                title="Cerrar"
+                className="flex h-8 w-8 items-center justify-center rounded-full text-neutral-500 transition-colors hover:bg-neutral-800/60 hover:text-neutral-100"
               >
-                ×
+                <IconoCerrar className="h-4 w-4" />
               </button>
             </div>
 
@@ -512,17 +558,22 @@ export default function HomePage() {
                   <div
                     key={s.id}
                     onClick={() => router.push(`/sondeo/${s.id}`)}
-                    className="group flex items-center justify-between rounded-xl border border-neutral-900 bg-neutral-900/50 p-3 cursor-pointer transition-all duration-200 hover:border-neutral-700 hover:bg-neutral-900"
+                    className="group flex cursor-pointer items-center justify-between rounded-xl border border-neutral-800/60 bg-neutral-900/50 p-3 transition-colors duration-200 hover:border-neutral-700 hover:bg-neutral-900"
                   >
                     <div className="flex flex-col">
                       <span className="text-sm text-neutral-200">
                         {formatearFecha(s.creadoEn)}
                       </span>
-                      <span className="text-xs text-neutral-500">
-                        {s.completa
-                          ? "Completo ✓"
-                          : `${s.preguntasRespondidas}/${s.totalPreguntas} preguntas`}
-                      </span>
+                      {s.completa ? (
+                        <span className="flex items-center gap-1.5 text-xs text-green-400">
+                          <IconoCheck className="h-3.5 w-3.5" />
+                          Completo
+                        </span>
+                      ) : (
+                        <span className="text-xs tabular-nums text-neutral-500">
+                          {s.preguntasRespondidas}/{s.totalPreguntas} preguntas
+                        </span>
+                      )}
                     </div>
                     <button
                       onClick={(e) => {
@@ -530,9 +581,9 @@ export default function HomePage() {
                         eliminarSesionModal(s.id);
                       }}
                       title="Eliminar sesión"
-                      className="opacity-0 group-hover:opacity-100 text-neutral-500 hover:text-red-400 transition-opacity"
+                      className="flex h-8 w-8 items-center justify-center rounded-full text-neutral-500 opacity-0 transition-colors hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100"
                     >
-                      🗑️
+                      <IconoEliminar className="h-4 w-4" />
                     </button>
                   </div>
                 ))}

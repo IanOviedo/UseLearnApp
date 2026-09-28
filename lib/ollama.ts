@@ -1,5 +1,8 @@
 import { buscarProveedorPorNombreDeModelo, type ProveedorNube } from "./proveedores"
 
+// Cantidad máxima de subtemas que se aceptan al extraerlos del texto de estudio.
+const MAX_SUBTEMAS = 6
+
 async function llamarOllama(modelo: string, prompt: string, think: boolean = false): Promise<string> {
   const response = await fetch("http://localhost:11434/api/generate", {
     method: "POST",
@@ -31,7 +34,7 @@ async function llamarOllama(modelo: string, prompt: string, think: boolean = fal
 
 
 export async function extraerSubtemas(texto: string, modelo: string = "gemma4:26b"): Promise<string[]> {
-  const prompt = `Extract the key sub-topics/concepts from the following text. Respond with ONLY a JSON array of short strings. Your answer must start with "[" and end with "]", with no text, explanations, backticks or code fences before or after (example: ["useState básico", "useEffect y dependencias", "props vs state"]).
+  const prompt = `Extract the key sub-topics/concepts from the following text. Respond with at most ${MAX_SUBTEMAS} sub-topics (only the most important ones). Respond with ONLY a JSON array of short strings. Your answer must start with "[" and end with "]", with no text, explanations, backticks or code fences before or after (example: ["useState básico", "useEffect y dependencias", "props vs state"]).
 
 Text:
 ${texto}`;
@@ -54,7 +57,7 @@ ${texto}`;
     if (!Array.isArray(subtemas)) {
       throw new Error("The model response is not a JSON array.");
     }
-    return subtemas as string[];
+    return (subtemas as string[]).slice(0, MAX_SUBTEMAS);
   } catch (error) {
     console.error("=== RAW MODEL RESPONSE (extraerSubtemas) ===", rawText);
     throw new Error(
