@@ -23,6 +23,7 @@ export default function SondeoPage() {
   const [fase, setFase] = useState<Fase>("sondeo");
   const [feedback, setFeedback] = useState("");
   const [subtemasDebiles, setSubtemasDebiles] = useState<string[]>([]);
+  const [subtemasSinDominar, setSubtemasSinDominar] = useState<string[]>([]);
 
   // Se valida en el render, no dentro del effect, para no hacer setState sincrónico.
   const idInvalido = !Number.isInteger(sesionId);
@@ -47,6 +48,7 @@ export default function SondeoPage() {
         setFase(data.fase);
         setFeedback(data.feedback ?? "");
         setSubtemasDebiles(data.subtemasDebiles);
+        setSubtemasSinDominar(data.subtemasSinDominar ?? []);
       } catch {
         if (!cancelado) setError("No se pudo conectar con el servidor.");
       } finally {
@@ -60,9 +62,14 @@ export default function SondeoPage() {
   }, [sesionId, idInvalido]);
 
   const manejarSondeoCompleto = useCallback(
-    (feedbackFinal: string, subtemasDebilesFinales: string[]) => {
+    (
+      feedbackFinal: string,
+      subtemasDebilesFinales: string[],
+      subtemasSinDominarFinales: string[]
+    ) => {
       setFeedback(feedbackFinal);
       setSubtemasDebiles(subtemasDebilesFinales);
+      setSubtemasSinDominar(subtemasSinDominarFinales);
       setFase("plan");
     },
     []
@@ -101,6 +108,7 @@ export default function SondeoPage() {
         sesionId={sesionId}
         feedback={feedback}
         subtemasDebiles={subtemasDebiles}
+        subtemasSinDominar={subtemasSinDominar}
         onVolver={() => router.push("/")}
       />
     );

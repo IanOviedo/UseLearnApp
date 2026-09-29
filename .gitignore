@@ -48,5 +48,3 @@ next-env.d.ts
 *.db-shm
 *.db-wal
 
-# scripts de prueba manual
-lib/seed-test.ts

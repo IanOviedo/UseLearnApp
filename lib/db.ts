@@ -103,6 +103,10 @@ export interface ResultadoRespuesta {
   subtemaId: number;
   correcta: boolean;
   yaRespondida: boolean;
+  /** La pregunta pertenecía a un lote abandonado: se guardó la respuesta pero no cuenta. */
+  descartada?: boolean;
+  /** El sub-tema quedó dominado (cubierto) con esta respuesta: su lote sobrante no sirve. */
+  dominado?: boolean;
 }
 
 // --- Sesiones ---------------------------------------------------------------
@@ -263,6 +267,24 @@ function obtenerSubtemasDebiles(sesionId: number): string[] {
   return filas.map((fila) => fila.nombre);
 }
 
+/**
+ * Sub-temas que no llegaron a dominarse (`cubierto = 0`). Incluye los que el sondeo nunca
+ * preguntó (se cerró por el tope de seguridad) y los que quedaron a medias. Antes no se
+ * mostraban en ningún lado, así que el plan podía decir "dominaste todos los sub-temas"
+ * aunque hubiera sub-temas sin evaluar.
+ */
+function obtenerSubtemasSinDominar(sesionId: number): string[] {
+  const filas = db
+    .prepare(
+      `SELECT nombre FROM subtemas
+       WHERE sesion_id = ? AND cubierto = 0
+       ORDER BY total_intentos ASC, id ASC`
+    )
+    .all(sesionId) as { nombre: string }[];
+
+  return filas.map((fila) => fila.nombre);
+}
+
 function sondeoCompleto(subtemas: SubtemaEstado[]): boolean {
   return subtemas.length > 0 && subtemas.every((subtema) => subtema.cubierto);
 }
@@ -340,8 +362,16 @@ function obtenerPreguntasDelSubtema(subtemaId: number): string[] {
 const registrarRespuesta = db.transaction(
   (preguntaId: number, opcionElegida: string): ResultadoRespuesta => {
     const pregunta = db
-      .prepare("SELECT id, subtema_id, contenido, respondida FROM preguntas WHERE id = ?")
-      .get(preguntaId) as { id: number; subtema_id: number; contenido: string; respondida: number } | undefined;
+      .prepare("SELECT id, subtema_id, contenido, respondida, descartada FROM preguntas WHERE id = ?")
+      .get(preguntaId) as
+      | {
+          id: number;
+          subtema_id: number;
+          contenido: string;
+          respondida: number;
+          descartada: number;
+        }
+      | undefined;
 
     if (!pregunta) {
       throw new Error(`La pregunta ${preguntaId} no existe`);
@@ -360,6 +390,10 @@ const registrarRespuesta = db.transaction(
     const datos = JSON.parse(pregunta.contenido) as Pregunta;
     const esperada = datos.opciones[datos.indiceCorrecta] ?? "";
     const correcta = normalizarTexto(opcionElegida) === normalizarTexto(esperada);
+    // Pregunta de un lote abandonado (el sub-tema ya se había dominado y el servidor
+    // descartó las que sobraban). El cliente puede seguir mostrándola desde su caché en
+    // memoria hasta que sabe que el sub-tema se cubrió.
+    const abandonada = pregunta.descartada === 1;
 
     db.prepare("INSERT INTO respuestas (pregunta_id, respuesta_usuario, correcta, corregido_en) VALUES (?, ?, ?, CURRENT_TIMESTAMP)").run(preguntaId, opcionElegida, correcta ? 1 : 0);
 
@@ -368,6 +402,15 @@ const registrarRespuesta = db.transaction(
     // marcada como descartada por error.
     db.prepare("UPDATE preguntas SET respondida = 1 WHERE id = ?").run(preguntaId);
 
+    // Respuesta a una pregunta que el sondeo ya había abandonado: se guarda el texto (el
+    // usuario la respondió) pero NO se toca el desempeño del sub-tema. Antes una pregunta
+    // descartada podía bajar `aciertos_seguidos` a 0 y "des-dominar" un sub-tema ya
+    // cubierto, además de inflar los contadores con intentos que no contaban.
+    if (abandonada) {
+      return { subtemaId: pregunta.subtema_id, correcta, yaRespondida: false, descartada: true };
+    }
+
+    let dominado = false;
     const subtema = db
       .prepare("SELECT aciertos_seguidos FROM subtemas WHERE id = ?")
       .get(pregunta.subtema_id) as { aciertos_seguidos: number } | undefined;
@@ -375,7 +418,7 @@ const registrarRespuesta = db.transaction(
     if (subtema) {
       // Al fallar, los aciertos seguidos vuelven a 0 y el sub-tema deja de estar dominado.
       const aciertos = correcta ? subtema.aciertos_seguidos + 1 : 0;
-      const dominado = aciertos >= ACIERTOS_SEGUIDOS_PARA_DOMINAR;
+      dominado = aciertos >= ACIERTOS_SEGUIDOS_PARA_DOMINAR;
 
       db.prepare(
         `UPDATE subtemas SET
@@ -395,7 +438,7 @@ const registrarRespuesta = db.transaction(
       }
     }
 
-    return { subtemaId: pregunta.subtema_id, correcta, yaRespondida: false };
+    return { subtemaId: pregunta.subtema_id, correcta, yaRespondida: false, dominado };
   }
 );
 
@@ -530,6 +573,7 @@ export {
   obtenerEstadoSondeo,
   esSubtemaDebil,
   obtenerSubtemasDebiles,
+  obtenerSubtemasSinDominar,
   actualizarFaseSesion,
   finalizarSondeo,
   listarSesionesConEstado,

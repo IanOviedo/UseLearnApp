@@ -23,7 +23,7 @@ export function obtenerProveedores(): ProveedorNube[] {
     const data = localStorage.getItem(STORAGE_KEY);
     if (!data) return [];
     return JSON.parse(data);
-  } catch (error) {
+  } catch {
     return [];
   }
 }

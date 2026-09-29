@@ -22,6 +22,8 @@ interface SiguientePreguntaResponse {
   lote?: LoteItem[];
   feedback?: string;
   subtemasDebiles?: string[];
+  /** Sub-temas sin dominar: el plan los muestra como pendientes, no como "a reforzar". */
+  subtemasSinDominar?: string[];
   error?: string;
   respondidas?: number;
   totalServibles?: number;
@@ -34,6 +36,10 @@ interface ResponderResponse {
   correcta?: boolean;
   subtemaId?: number;
   yaRespondida?: boolean;
+  /** El sub-tema quedó dominado: el resto del lote cacheado ya no sirve. */
+  dominado?: boolean;
+  /** La pregunta respondida era de un lote abandonado: no contó y hay que pedir la siguiente. */
+  descartada?: boolean;
   error?: string;
   /** Fase B.10 — merge: llega cuando se mandó `siguiente: true` y no había nada cacheado. */
   siguiente?: SiguientePreguntaResponse;
@@ -60,7 +66,11 @@ interface FaseSondeoProps {
   sesionId: number;
   /** Respuestas ya registradas en el servidor, para reanudar al recargar la página. */
   historialInicial?: ItemHistorial[];
-  onSondeoCompleto: (feedback: string, subtemasDebiles: string[]) => void;
+  onSondeoCompleto: (
+    feedback: string,
+    subtemasDebiles: string[],
+    subtemasSinDominar: string[]
+  ) => void;
 }
 
 const PROGRESO_INICIAL: ProgresoSondeo = {
@@ -196,6 +206,7 @@ export default function FaseSondeo({
   );
   const [progreso, setProgreso] = useState<ProgresoSondeo>(PROGRESO_INICIAL);
   const [subtemasDebiles, setSubtemasDebiles] = useState<string[]>([]);
+  const [subtemasSinDominar, setSubtemasSinDominar] = useState<string[]>([]);
 
   const finRef = useRef<HTMLDivElement>(null);
   const notificadoRef = useRef(false);
@@ -251,6 +262,7 @@ export default function FaseSondeo({
       // Llegan del servidor: calcularlos en el cliente hacía que al recargar la
       // página el plan terminara siempre vacío ("no fallaste ningún subtema").
       setSubtemasDebiles(data.subtemasDebiles ?? []);
+      setSubtemasSinDominar(data.subtemasSinDominar ?? []);
       return;
     }
 
@@ -351,8 +363,8 @@ export default function FaseSondeo({
   useEffect(() => {
     if (!completo || notificadoRef.current) return;
     notificadoRef.current = true;
-    onSondeoCompleto(feedback ?? "", subtemasDebiles);
-  }, [completo, feedback, subtemasDebiles, onSondeoCompleto]);
+    onSondeoCompleto(feedback ?? "", subtemasDebiles, subtemasSinDominar);
+  }, [completo, feedback, subtemasDebiles, subtemasSinDominar, onSondeoCompleto]);
 
 
   function elegirOpcion(index: number, opcion: string) {
@@ -374,17 +386,35 @@ export default function FaseSondeo({
     const config = leerConfigLocal();
     try {
       if (cacheRef.current.length > 0) {
-        // Caché llena: el POST solo guarda la respuesta (SQLite local, pocos ms) y
-        // la siguiente sale de memoria. Un request rápido en vez de dos.
-        await fetch("/api/sondeo/responder", {
+        // Caché llena: el POST solo guarda la respuesta (SQLite local, pocos ms) y la
+        // siguiente sale de memoria. Igual se espera la respuesta porque trae `dominado`:
+        // si con esta respuesta el sub-tema quedó cubierto, el servidor descartó las
+        // preguntas que sobraban del lote y no hay que seguir sirviéndolas desde la caché
+        // (antes se mostraban igual y ensuciaban el dominio y los contadores del sub-tema).
+        const res = await fetch("/api/sondeo/responder", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             preguntaId: item.preguntaId,
             opcionElegida: item.opcionElegida,
           }),
-        }).catch(() => {});
-        mostrarDelCache();
+        }).catch(() => null);
+        const data: ResponderResponse | null = res ? await res.json().catch(() => null) : null;
+
+        if (data?.dominado === true || data?.descartada === true) {
+          const subtemaId = data?.subtemaId;
+          if (typeof subtemaId === "number") {
+            cacheRef.current = cacheRef.current.filter((i) => i.subtemaId !== subtemaId);
+          }
+        }
+
+        if (data?.descartada === true) {
+          // La pregunta ya no contaba para el sondeo: se pide la siguiente de verdad.
+          await cargarSiguientePregunta();
+        } else if (!mostrarDelCache()) {
+          // La caché quedó vacía (el sub-tema se dominó): se pide el próximo lote/sub-tema.
+          await cargarSiguientePregunta();
+        }
       } else {
         // Caché vacía: se pide la siguiente EN EL MISMO POST (Fase B.10) — un solo
         // roundtrip aunque el modelo tenga que generar un lote nuevo.

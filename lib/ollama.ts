@@ -31,7 +31,10 @@ interface OpcionesModelo {
   prompt: string;
   modelo: string;
   proveedor?: ProveedorNube;
-  /** El camino OpenAI-compatible solo pide "json_object" cuando la respuesta es un objeto. */
+  /**
+   * La respuesta esperada es un objeto JSON: activa `response_format: json_object` en
+   * OpenAI-compatible y `format: "json"` en Ollama. Con false se pide texto plano.
+   */
   esperaObjeto?: boolean;
   /** Topa los tokens generados: corta la verborragia de raíz (modelos grandes). */
   numPredict?: number;
@@ -50,12 +53,26 @@ function quitarRazonamiento(texto: string): string {
     .replace(new RegExp("<thinking>.*?</thinking>", "s"), "")
 }
 
-async function llamarOllama(
-  modelo: string,
-  prompt: string,
-  numPredict?: number,
-  esquema?: Record<string, unknown>
-): Promise<string> {
+interface OpcionesOllama {
+  modelo: string;
+  prompt: string;
+  numPredict?: number;
+  esquema?: Record<string, unknown>;
+  /**
+   * Solo cuando la respuesta tiene que ser JSON. `format: "json"` obliga al modelo a
+   * devolver un objeto, así que pedir prosa con ese flag devuelve `{"feedback": "..."}`:
+   * exactamente lo que se estaba guardando como feedback final del sondeo.
+   */
+  esperaObjeto?: boolean;
+}
+
+async function llamarOllama({
+  modelo,
+  prompt,
+  numPredict,
+  esquema,
+  esperaObjeto = false,
+}: OpcionesOllama): Promise<string> {
   // Fase B.8 — format + options + keep_alive en UNA llamada:
   // - format=json|schema → el modelo rellena campos, no improvisa llaves/comas
   //   (adiós reintentos por parseo roto, que duplicaban el tiempo con 26b).
@@ -72,7 +89,10 @@ async function llamarOllama(
       stream: false,
       think: false,
       keep_alive: OLLAMA_KEEP_ALIVE,
-      ...(esquema ? { format: esquema } : { format: "json" }),
+      // `format` SOLO cuando el llamador espera JSON: antes cualquier llamada sin esquema
+      // salía con format:"json" y el feedback en prosa volvía envuelto en
+      // {"feedback": "..."} — el plan mostraba JSON crudo en pantalla.
+      ...(esquema ? { format: esquema } : esperaObjeto ? { format: "json" } : {}),
       options: {
         temperature: TEMPERATURA_JSON,
         num_ctx: OLLAMA_NUM_CTX,
@@ -169,7 +189,7 @@ async function llamarModelo({ prompt, modelo, proveedor, esperaObjeto = false, n
     return llamarGeminiNativo(prompt)
   }
 
-  return llamarOllama(modelo, prompt, numPredict, esquema)
+  return llamarOllama({ modelo, prompt, numPredict, esquema, esperaObjeto })
 }
 
 // --- Parseo -----------------------------------------------------------------
@@ -457,10 +477,19 @@ export async function generarFeedbackSondeo(
           .join("\n")}\n`
       : ""
 
+  // Sub-temas que el sondeo no llegó a preguntar (0 intentos): sin esto el feedback podía
+  // dar por dominado todo el material aunque el sondeo se hubiera cerrado antes (tope de
+  // seguridad o sub-temas que nunca se sirvieron).
+  const sinEvaluar = resultados.filter((r) => r.intentos === 0).map((r) => r.nombre)
+  const notaSinEvaluar =
+    sinEvaluar.length > 0
+      ? `\nSub-temas que NO se llegaron a evaluar (no los presentes como dominados: decí que quedaron pendientes): ${sinEvaluar.join(", ")}.\n`
+      : ""
+
   const prompt = `Sos un tutor de React. Un estudiante acaba de terminar un sondeo (quiz de diagnóstico) sobre varios sub-temas. Este es el resultado por sub-tema:
 
 ${resumen}
-${detalleErrores}
+${detalleErrores}${notaSinEvaluar}
 Escribí un feedback breve (3-5 oraciones) en español, directo y útil:
 - Destacá qué domina bien.
 - Señalá específicamente qué sub-temas necesita reforzar y por qué eso importa en la práctica. Si los errores muestran una confusión concreta entre dos conceptos, nombrá esa confusión.

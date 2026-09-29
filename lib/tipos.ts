@@ -49,6 +49,8 @@ export interface EstadoSesion {
   progreso: ProgresoSondeo;
   subtemas: SubtemaEstado[];
   subtemasDebiles: string[];
+  /** Sub-temas sin dominar (`cubierto = 0`): el plan los muestra como pendientes. */
+  subtemasSinDominar: string[];
   historial: ItemHistorial[];
 }
 

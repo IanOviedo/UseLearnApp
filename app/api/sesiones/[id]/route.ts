@@ -5,6 +5,7 @@ import {
   obtenerSesion,
   obtenerSubtemas,
   obtenerSubtemasDebiles,
+  obtenerSubtemasSinDominar,
 } from "@/lib/db";
 import type { EstadoSesion } from "@/lib/tipos";
 
@@ -50,6 +51,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
       progreso: contarProgresoSesion(sesionId, subtemas),
       subtemas,
       subtemasDebiles: obtenerSubtemasDebiles(sesionId),
+      subtemasSinDominar: obtenerSubtemasSinDominar(sesionId),
       historial: obtenerHistorialSesion(sesionId),
     };
 

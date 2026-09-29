@@ -11,7 +11,9 @@ import {
   obtenerEstadoSondeo,
   obtenerPreguntasDelSubtema,
   obtenerPreguntasSinResponder,
+  obtenerSubtemas,
   obtenerSubtemasDebiles,
+  obtenerSubtemasSinDominar,
   sondeoCompleto,
   esSubtemaDebil,
 } from "./db";
@@ -42,6 +44,8 @@ export interface SiguientePayload {
   lote?: LoteItem[];
   feedback?: string;
   subtemasDebiles?: string[];
+  /** Sub-temas que quedaron sin dominar: el plan los muestra aparte (no son "a reforzar"). */
+  subtemasSinDominar?: string[];
   respondidas?: number;
   totalServibles?: number;
   subtemasTotal?: number;
@@ -66,8 +70,15 @@ export async function servirSiguiente(args: {
 
   if (sondeoCompleto(subtemas) || progreso.respondidas >= MAX_PREGUNTAS_SESION) {
     const subtemasDebiles = obtenerSubtemasDebiles(args.sesionId);
+    const subtemasSinDominar = obtenerSubtemasSinDominar(args.sesionId);
     if (sesion.feedbackFinal !== null) {
-      return { completo: true, feedback: sesion.feedbackFinal, subtemasDebiles, ...progreso };
+      return {
+        completo: true,
+        feedback: sesion.feedbackFinal,
+        subtemasDebiles,
+        subtemasSinDominar,
+        ...progreso,
+      };
     }
     const feedback = await generarFeedbackSondeo(
       resultadosDe(subtemas),
@@ -76,7 +87,7 @@ export async function servirSiguiente(args: {
       args.proveedorPrincipal
     );
     finalizarSondeo(args.sesionId, feedback);
-    return { completo: true, feedback, subtemasDebiles, ...progreso };
+    return { completo: true, feedback, subtemasDebiles, subtemasSinDominar, ...progreso };
   }
 
   const subtema = elegirSiguienteSubtema(subtemas);
@@ -151,11 +162,14 @@ export function lanzarPregenSiConviene(args: {
   const trabajo = (async () => {
     const { sesion, subtemas } = obtenerEstadoSondeo(args.sesionId);
     if (!sesion) return;
-    // El siguiente sub-tema sin cubrir que todavía no tenga pendientes: su lote se
-    // genera ahora para que ya esté guardado cuando el cliente lo pida.
+    // El candidato se elige con la MISMA política que `servirSiguiente` (el sub-tema menos
+    // avanzado de los que quedan): antes se tomaba el primero por id que no tuviera
+    // pendientes, que podía no ser el que se iba a servir, y la transición terminaba
+    // esperando al modelo igual (además de generar un lote que no se usaba enseguida).
     const candidatos = subtemas.filter((s) => !s.cubierto && s.id !== args.subtemaActualId);
-    const siguiente = candidatos.find((s) => obtenerPreguntasSinResponder(s.id).length === 0);
+    const siguiente = elegirSiguienteSubtema(candidatos);
     if (!siguiente) return;
+    if (obtenerPreguntasSinResponder(siguiente.id).length > 0) return;
     const previas = obtenerPreguntasDelSubtema(siguiente.id);
     const lote = await generarLotePreguntas(
       siguiente.nombre,
@@ -164,10 +178,13 @@ export function lanzarPregenSiConviene(args: {
       args.proveedorPreguntas,
       previas
     );
-    // Re-chequeo POST-generación: dos requests seguidos pueden disparar dos pre-gens
-    // del mismo sub-tema a la vez (los dos vieron 0 pendientes al arrancar). Como
-    // este chequeo y el guardado son síncronos y Node es single-thread, no puede
-    // intercalarse otro request entre ambos: la ventana de carrera queda cerrada.
+    // Re-chequeo POST-generación (síncrono, sin await en el medio: Node es single-thread,
+    // así que ningún otro request puede intercalarse entre el chequeo y el guardado):
+    // - si otro request ya guardó el lote de este sub-tema, no se duplica;
+    // - si el sub-tema se cubrió mientras se generaba, el lote ya no sirve y se descarta
+    //   (si no, quedarían preguntas pendientes para siempre sumando al total del sondeo).
+    const estadoActual = obtenerSubtemas(args.sesionId).find((s) => s.id === siguiente.id);
+    if (!estadoActual || estadoActual.cubierto) return;
     if (obtenerPreguntasSinResponder(siguiente.id).length > 0) return;
     guardarLotePreguntas(
       args.sesionId,

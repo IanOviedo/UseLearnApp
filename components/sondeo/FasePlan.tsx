@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { IconoAlerta, IconoCheck, IconoGrafo, IconoObjetivo } from "@/components/ui/Iconos";
+import { IconoAlerta, IconoCheck, IconoFlecha, IconoGrafo, IconoObjetivo } from "@/components/ui/Iconos";
 
 const MERMAID_CDN = "https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js";
 
@@ -9,6 +9,8 @@ interface FasePlanProps {
   sesionId: number;
   feedback: string;
   subtemasDebiles: string[];
+  /** Sub-temas sin dominar (`cubierto = 0`): el sondeo no llegó a cubrirlos. */
+  subtemasSinDominar: string[];
   onVolver: () => void;
 }
 
@@ -40,11 +42,24 @@ function construirGrafo(subtemasDebiles: string[]): string {
   return lineas.join("\n");
 }
 
-export default function FasePlan({ sesionId, feedback, subtemasDebiles, onVolver }: FasePlanProps) {
+export default function FasePlan({
+  sesionId,
+  feedback,
+  subtemasDebiles,
+  subtemasSinDominar,
+  onVolver,
+}: FasePlanProps) {
   const contenedorGrafoRef = useRef<HTMLDivElement>(null);
   const [errorMapa, setErrorMapa] = useState<string | null>(null);
 
   const grafo = useMemo(() => construirGrafo(subtemasDebiles), [subtemasDebiles]);
+  // Los sub-temas sin dominar que NO tienen errores ya no se listan arriba: acá quedan los
+  // que el sondeo dejó a medias (nunca evaluados o evaluados sin llegar a dominarse), que
+  // antes no aparecían en ninguna parte y hacían que el plan diera por sabido todo el tema.
+  const sinDominarPendientes = useMemo(
+    () => subtemasSinDominar.filter((subtema) => !subtemasDebiles.includes(subtema)),
+    [subtemasSinDominar, subtemasDebiles]
+  );
   const idGrafo = `mapa-conceptual-${sesionId}`;
 
   useEffect(() => {
@@ -154,7 +169,11 @@ export default function FasePlan({ sesionId, feedback, subtemasDebiles, onVolver
             <h2 className="text-sm font-semibold tracking-tight text-neutral-100">Subtemas a reforzar</h2>
           </div>
           {subtemasDebiles.length === 0 ? (
-            <p className="text-sm text-neutral-500">Dominaste todos los subtemas. ¡Buen trabajo!</p>
+            <p className="text-sm text-neutral-500">
+              {sinDominarPendientes.length === 0
+                ? "Dominaste todos los subtemas. ¡Buen trabajo!"
+                : "No fallaste ninguno de los subtemas que se evaluaron."}
+            </p>
           ) : (
             <ul className="flex flex-col gap-2">
               {subtemasDebiles.map((subtema) => (
@@ -169,6 +188,31 @@ export default function FasePlan({ sesionId, feedback, subtemasDebiles, onVolver
             </ul>
           )}
         </div>
+
+        {sinDominarPendientes.length > 0 && (
+          <div className="animate-fade-in-up rounded-2xl border border-neutral-800/60 bg-neutral-900/50 p-6 shadow-[0_24px_48px_-24px_rgba(0,0,0,0.85)]">
+            <div className="mb-4 flex items-center gap-2.5">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-neutral-800 bg-neutral-950/60 text-neutral-400">
+                <IconoFlecha className="h-4 w-4" />
+              </span>
+              <h2 className="text-sm font-semibold tracking-tight text-neutral-100">Quedaron sin dominar</h2>
+            </div>
+            <p className="mb-3 text-xs text-neutral-500">
+              El sondeo se cerró antes de cubrirlos, así que todavía no podés darlos por sabidos.
+            </p>
+            <ul className="flex flex-col gap-2">
+              {sinDominarPendientes.map((subtema) => (
+                <li
+                  key={subtema}
+                  className="flex items-center gap-3 rounded-xl border border-neutral-800/60 bg-neutral-950/40 px-4 py-3"
+                >
+                  <IconoFlecha className="h-4 w-4 shrink-0 text-neutral-500" />
+                  <span className="text-sm text-neutral-300">{etiquetaSubtema(subtema)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {subtemasDebiles.length > 0 && (
           <div className="animate-fade-in-up rounded-2xl border border-neutral-800/60 bg-neutral-900/50 p-6 shadow-[0_24px_48px_-24px_rgba(0,0,0,0.85)]">

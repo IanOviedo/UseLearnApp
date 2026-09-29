@@ -58,5 +58,9 @@ export const EXCERPT_MAX_CHARS = 1800;
 /** Cuántos caracteres del head se usan para extraer sub-temas (corte por párrafo). */
 export const SUBTEMAS_HEAD_CHARS = 3500;
 
-/** Si quedan esta cantidad (o menos) de pendientes, se pre-genera en paralelo. */
-export const PREGEN_UMBRAL_PENDIENTES = 1;
+/** Si quedan esta cantidad (o menos) de pendientes, se pre-genera en paralelo.
+ *  Con lotes de 3 y 2 aciertos seguidos para dominar, un sub-tema se cubre en la 2ª
+ *  respuesta y sobra 1 pregunta: la transición al sub-tema siguiente cae enseguida, así
+ *  que el lote del próximo tiene que estar generándose desde la 1ª pregunta (antes el
+ *  umbral era 1 y nunca disparaba con lotes completos → cada transición esperaba al modelo). */
+export const PREGEN_UMBRAL_PENDIENTES = 2;

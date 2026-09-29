@@ -41,6 +41,15 @@ export async function POST(request: NextRequest) {
 
     const resultado = registrarRespuesta(preguntaId, opcionElegida);
 
+    // El cliente guarda en memoria el resto del lote de la pregunta respondida. Estos dos
+    // flags le dicen si ese lote sigue vigente: `dominado` (con esta respuesta el sub-tema
+    // se cubrió y el servidor descartó las preguntas que sobraban) y `descartada` (la
+    // pregunta respondida ya pertenecía a un lote abandonado).
+    const estadoLote = {
+      dominado: resultado.dominado === true,
+      descartada: resultado.descartada === true,
+    };
+
     // Fase B.10 — merge responder→siguiente: si el cliente pide `siguiente: true`
     // se devuelve la próxima pregunta en la MISMA respuesta (1 roundtrip en vez de
     // POST + GET). Sin el flag, el contrato viejo se mantiene intacto.
@@ -75,6 +84,7 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({
           ok: true,
+          ...estadoLote,
           correcta: resultado.correcta,
           subtemaId: resultado.subtemaId,
           yaRespondida: resultado.yaRespondida,
@@ -85,6 +95,7 @@ export async function POST(request: NextRequest) {
         // cliente pide la siguiente por el camino normal.
         return NextResponse.json({
           ok: true,
+          ...estadoLote,
           correcta: resultado.correcta,
           subtemaId: resultado.subtemaId,
           yaRespondida: resultado.yaRespondida,
@@ -95,6 +106,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       ok: true,
+      ...estadoLote,
       correcta: resultado.correcta,
       subtemaId: resultado.subtemaId,
       yaRespondida: resultado.yaRespondida,
