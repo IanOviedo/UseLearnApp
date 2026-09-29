@@ -33,3 +33,30 @@ export const OPCIONES_POR_PREGUNTA = 4;
 
 /** Fragmentos de nombre que delatan modelos de embeddings: no sirven para generar texto. */
 export const MODELOS_NO_GENERATIVOS = ["embed", "minilm", "bge-", "rerank"];
+
+// --- Fase B (velocidad) -------------------------------------------------------
+// Todo el transporte hacia Ollama local vive acá para que gemma4:26b y otros
+// modelos grandes respondan rápido y no se desperdicien recursos.
+
+/** Mantiene el modelo cargado en VRAM entre llamadas: el 2º lote no recarga pesos. */
+export const OLLAMA_KEEP_ALIVE = "30m";
+
+/** Ventana de contexto pedida a Ollama: acotada para no hacer OOM con PDFs grandes. */
+export const OLLAMA_NUM_CTX = 8192;
+
+/** Temperatura baja = JSON determinista, menos tokens basura y menos reintentos. */
+export const TEMPERATURA_JSON = 0.2;
+
+/** Tope de tokens generados: corta de raíz la verborragia si el modelo divaga. */
+export const NUM_PREDICT_SUBTEMAS = 400;
+export const NUM_PREDICT_LOTE = 1200;
+export const NUM_PREDICT_FEEDBACK = 300;
+
+/** Tamaño del excerpt por subtema: se manda esto en vez del textoOriginal entero. */
+export const EXCERPT_MAX_CHARS = 1800;
+
+/** Cuántos caracteres del head se usan para extraer sub-temas (corte por párrafo). */
+export const SUBTEMAS_HEAD_CHARS = 3500;
+
+/** Si quedan esta cantidad (o menos) de pendientes, se pre-genera en paralelo. */
+export const PREGEN_UMBRAL_PENDIENTES = 1;

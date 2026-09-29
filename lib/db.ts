@@ -278,12 +278,30 @@ function elegirSiguienteSubtema(subtemas: SubtemaEstado[]): SubtemaEstado | null
 
 // --- Preguntas --------------------------------------------------------------
 
+/**
+ * Fase B.10 — guarda el lote completo en UNA transacción. Antes era un INSERT por
+ * pregunta (N roundtrips a SQLite por lote).
+ */
+const guardarLote = db.transaction(
+  (sesionId: number, subtemaId: number, fase: string, lote: string[]): number[] => {
+    const stmt = db.prepare(
+      "INSERT INTO preguntas (sesion_id, subtema_id, fase, contenido, tipo) VALUES (?, ?, ?, ?, 'multiple_choice')"
+    );
+    return lote.map((contenido) => Number(stmt.run(sesionId, subtemaId, fase, contenido).lastInsertRowid));
+  }
+);
+
 function guardarPregunta(sesionId: number, subtemaId: number, fase: string, contenido: string, tipo: string): number {
   const resultado = db
     .prepare("INSERT INTO preguntas (sesion_id, subtema_id, fase, contenido, tipo) VALUES (?, ?, ?, ?, ?)")
     .run(sesionId, subtemaId, fase, contenido, tipo);
 
   return Number(resultado.lastInsertRowid);
+}
+
+/** Guarda el lote de una vez (una transacción): devuelve los ids en orden. */
+function guardarLotePreguntas(sesionId: number, subtemaId: number, fase: string, contenidos: string[]): number[] {
+  return guardarLote(sesionId, subtemaId, fase, contenidos);
 }
 
 function obtenerPreguntasSinResponder(subtemaId: number): { id: number; contenido: string }[] {
@@ -502,6 +520,7 @@ export {
   elegirSiguienteSubtema,
   sondeoCompleto,
   guardarPregunta,
+  guardarLotePreguntas,
   obtenerPreguntasSinResponder,
   obtenerPreguntasDelSubtema,
   registrarRespuesta,

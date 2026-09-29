@@ -1,15 +1,23 @@
 import {
+  EXCERPT_MAX_CHARS,
   MAX_SUBTEMAS,
   MODELO_GEMINI,
   MODELO_NUBE_POR_DEFECTO,
   MODELO_PREGUNTAS_POR_DEFECTO,
   MODELO_PRINCIPAL_POR_DEFECTO,
+  NUM_PREDICT_FEEDBACK,
+  NUM_PREDICT_LOTE,
+  NUM_PREDICT_SUBTEMAS,
+  OLLAMA_KEEP_ALIVE,
+  OLLAMA_NUM_CTX,
   OPCIONES_POR_PREGUNTA,
   PREGUNTAS_POR_LOTE,
+  TEMPERATURA_JSON,
   URL_GEMINI,
 } from "./config"
 import type { ProveedorNube } from "./proveedores"
 import type { Pregunta } from "./tipos"
+import { extraerExcerpt, headPorParrafo } from "./texto"
 
 // --- Gateway de modelos -----------------------------------------------------
 //
@@ -25,6 +33,10 @@ interface OpcionesModelo {
   proveedor?: ProveedorNube;
   /** El camino OpenAI-compatible solo pide "json_object" cuando la respuesta es un objeto. */
   esperaObjeto?: boolean;
+  /** Topa los tokens generados: corta la verborragia de raíz (modelos grandes). */
+  numPredict?: number;
+  /** Esquema JSON para /api/generate: el modelo rellena campos, no inventa formato. */
+  esquema?: Record<string, unknown>;
 }
 
 function esModeloGemini(modelo: string): boolean {
@@ -38,7 +50,19 @@ function quitarRazonamiento(texto: string): string {
     .replace(new RegExp("<thinking>.*?</thinking>", "s"), "")
 }
 
-async function llamarOllama(modelo: string, prompt: string): Promise<string> {
+async function llamarOllama(
+  modelo: string,
+  prompt: string,
+  numPredict?: number,
+  esquema?: Record<string, unknown>
+): Promise<string> {
+  // Fase B.8 — format + options + keep_alive en UNA llamada:
+  // - format=json|schema → el modelo rellena campos, no improvisa llaves/comas
+  //   (adiós reintentos por parseo roto, que duplicaban el tiempo con 26b).
+  // - options num_ctx acotado + num_predict topado + temperature baja →
+  //   menos VRAM, corte temprano si divaga, JSON determinista.
+  // - keep_alive=30m → el 2º lote no recarga los 26b en VRAM (era ~mitad del wait).
+  // - think=false → sin tokens de razonamiento basura (velocidad pura).
   const response = await fetch("http://localhost:11434/api/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -47,6 +71,13 @@ async function llamarOllama(modelo: string, prompt: string): Promise<string> {
       prompt,
       stream: false,
       think: false,
+      keep_alive: OLLAMA_KEEP_ALIVE,
+      ...(esquema ? { format: esquema } : { format: "json" }),
+      options: {
+        temperature: TEMPERATURA_JSON,
+        num_ctx: OLLAMA_NUM_CTX,
+        ...(typeof numPredict === "number" ? { num_predict: numPredict } : {}),
+      },
     }),
   })
 
@@ -127,7 +158,7 @@ async function llamarGeminiNativo(prompt: string, proveedor?: ProveedorNube): Pr
  * Prioridad: proveedor explícito (viene del cliente en cada request, porque el server
  * no puede leer localStorage) → nombre de modelo que empieza con "gemini" → Ollama local.
  */
-async function llamarModelo({ prompt, modelo, proveedor, esperaObjeto = false }: OpcionesModelo): Promise<string> {
+async function llamarModelo({ prompt, modelo, proveedor, esperaObjeto = false, numPredict, esquema }: OpcionesModelo): Promise<string> {
   if (proveedor) {
     return proveedor.formato === "gemini-nativo"
       ? llamarGeminiNativo(prompt, proveedor)
@@ -138,7 +169,7 @@ async function llamarModelo({ prompt, modelo, proveedor, esperaObjeto = false }:
     return llamarGeminiNativo(prompt)
   }
 
-  return llamarOllama(modelo, prompt)
+  return llamarOllama(modelo, prompt, numPredict, esquema)
 }
 
 // --- Parseo -----------------------------------------------------------------
@@ -189,12 +220,6 @@ function validarPregunta(parsed: unknown): Pregunta {
   }
 }
 
-/** Parsea una pregunta suelta. Tolerante a texto alrededor del JSON o bloques de código. */
-function parsearRespuestaPregunta(rawText: string): Pregunta {
-  const limpio = recortarEntre(sinBloquesDeCodigo(rawText), "{", "}")
-  return validarPregunta(JSON.parse(limpio))
-}
-
 /**
  * Parsea un lote y descarta preguntas repetidas dentro del mismo lote.
  * Puede devolver menos de lo pedido si el modelo repitió o falló alguna.
@@ -238,14 +263,21 @@ async function fetchGeminiConReintento(url: string, body: string): Promise<Respo
   return primero
 }
 
-export function construirPromptSubtemas(texto: string): string {
-  return `Extraé los sub-temas/conceptos clave del siguiente texto. Devolvé como máximo ${MAX_SUBTEMAS} sub-temas (solo los más importantes). Respondé ÚNICAMENTE con un array JSON de strings cortos. Tu respuesta debe empezar con "[" y terminar con "]", sin texto, explicaciones, backticks ni bloques de código antes ni después (ejemplo: ["useState básico", "useEffect y dependencias", "props vs state"]).
+export function construirPromptSubtemas(texto: string, excerpt?: string): string {
+  // Fase B.9 — se manda el head (3.5k) en vez del texto entero: extraer subtemas
+  // no necesita el PDF completo y el 26b lo procesa ~10x más rápido.
+  const fuente = (excerpt ?? headPorParrafo(texto)).slice(0, 4000)
+  return `TEXTO:
+"""
+${fuente}
+"""
 
-Texto:
-${texto}`
+TAREA: Extraé hasta ${MAX_SUBTEMAS} sub-temas principales del TEXTO de arriba.
+Respondé SOLO con un array JSON de strings cortos en español (2 a 6 palabras).
+Ejemplo: ["useState básico", "useEffect y dependencias", "props vs state"].`
 }
 
-/** Bloque de "no repitas esto" que se comparte entre el prompt suelto y el de lote. */
+/** Lista anti-repetición para el prompt de lote (solo enunciados, sin JSON). */
 function bloquePreguntasPrevias(preguntasPrevias: string[]): string {
   if (preguntasPrevias.length === 0) return ""
 
@@ -254,60 +286,45 @@ function bloquePreguntasPrevias(preguntasPrevias: string[]): string {
     .join("\n")}\n`
 }
 
-export function construirPromptPregunta(
-  subtema: string,
-  textoOriginal: string,
-  preguntasPrevias: string[] = []
-): string {
-  return `Sos un asistente que genera preguntas de opción múltiple ÚNICAMENTE a partir del siguiente texto de estudio. No uses conocimiento externo ni inventes información que no esté en el texto.
-
-Texto de estudio:
-"""
-${textoOriginal}
-"""
-
-Generá UNA pregunta de opción múltiple sobre el sub-tema "${subtema}", basada estrictamente en el contenido del texto de arriba.
-
-Formato de salida obligatorio (sin razonar en voz alta):
-- Tu respuesta es exactamente un objeto JSON, con esta forma:
-{"pregunta": "texto de la pregunta", "opciones": ["opción A", "opción B", "opción C", "opción D"], "indiceCorrecta": 0}
-- No agregues texto, explicaciones, comentarios ni razonamiento antes ni después. No uses backticks ni bloques de código: el JSON va en texto plano.
-
-${bloquePreguntasPrevias(preguntasPrevias)}Reglas:
-- La pregunta y todas las opciones deben basarse solo en lo que dice el texto de estudio, no en conocimiento general de React.
-- Exactamente ${OPCIONES_POR_PREGUNTA} opciones.
-- "indiceCorrecta" debe ser un número entero de 0 a ${OPCIONES_POR_PREGUNTA - 1}: el índice (base 0) de la opción correcta dentro del array "opciones".
-- La pregunta debe evaluar comprensión real, no ser trivial.
-- Cada distractor tiene que ser un error PLAUSIBLE (una confusión típica de quien recién aprende), nunca una opción absurda ni descartable por sentido común.
-- Si la pregunta compara dos cosas (por ejemplo React vs Vanilla JavaScript, o dos conceptos distintos), verificá que cada característica corresponda al concepto correcto antes de escribir el JSON.
-- El array "opciones" debe tener EXACTAMENTE ${OPCIONES_POR_PREGUNTA} elementos, todos con texto no vacío.`
-}
-
 export function construirPromptLotePreguntas(
   subtema: string,
   textoOriginal: string,
   preguntasPrevias: string[] = []
 ): string {
-  return `Basándote en el siguiente texto de estudio, generá EXACTAMENTE ${PREGUNTAS_POR_LOTE} preguntas de opción múltiple sobre el subtema "${subtema}".
-
-Texto de estudio:
-${textoOriginal}
+  // Fase B.8+9 — TEXTO primero (prefix caching en Ollama) + excerpt (~1.8k) en vez
+  // del documento entero (~50k de un PDF). El 26b pasa de minutos a segundos.
+  const excerpt = extraerExcerpt(textoOriginal, subtema, EXCERPT_MAX_CHARS)
+  return `TEXTO:
+"""
+${excerpt}
+"""
 ${bloquePreguntasPrevias(preguntasPrevias)}
-Reglas:
-- La pregunta y todas las opciones deben basarse solo en lo que dice el texto de estudio, no en conocimiento general de React.
-- Exactamente ${OPCIONES_POR_PREGUNTA} opciones por pregunta.
-- "indiceCorrecta" debe ser un número entero de 0 a ${OPCIONES_POR_PREGUNTA - 1}.
-- Cada pregunta debe evaluar comprensión real, no ser trivial.
-- Cada distractor tiene que ser un error PLAUSIBLE (una confusión típica de quien recién aprende), nunca una opción absurda ni descartable por sentido común.
-- El array "opciones" de cada pregunta debe tener EXACTAMENTE ${OPCIONES_POR_PREGUNTA} elementos, todos con texto no vacío.
-- Las ${PREGUNTAS_POR_LOTE} preguntas deben cubrir aspectos DISTINTOS del subtema, sin reformular la misma idea.
-
-Respondé ÚNICAMENTE con un array JSON: empezás con "[" y terminás con "]". No agregues texto, explicaciones, comentarios ni razonamiento antes ni después, y no uses backticks ni bloques de código.
-El array debe tener exactamente ${PREGUNTAS_POR_LOTE} objetos, cada uno con esta forma exacta:
-[{"pregunta": "...", "opciones": ["...", "...", "...", "..."], "indiceCorrecta": 0}, {"pregunta": "...", "opciones": ["...", "...", "...", "..."], "indiceCorrecta": 0}, {"pregunta": "...", "opciones": ["...", "...", "...", "..."], "indiceCorrecta": 0}]`
+TAREA: Generá EXACTAMENTE ${PREGUNTAS_POR_LOTE} preguntas de opción múltiple sobre "${subtema}", basadas estrictamente en el TEXTO de arriba.
+Reglas: exactamente ${OPCIONES_POR_PREGUNTA} opciones por pregunta; "indiceCorrecta" entero de 0 a ${OPCIONES_POR_PREGUNTA - 1}; distractores plausibles (confusiones típicas, nunca absurdos); las ${PREGUNTAS_POR_LOTE} cubren aspectos DISTINTOS.
+Respondé SOLO con el array JSON, sin texto antes ni después.`
 }
 
 // --- API pública ------------------------------------------------------------
+
+/** Esquema JSON del lote: Ollama obliga al modelo a rellenar campos válidos. */
+const ESQUEMA_LOTE = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: {
+      pregunta: { type: "string" },
+      opciones: { type: "array", items: { type: "string" } },
+      indiceCorrecta: { type: "integer" },
+    },
+    required: ["pregunta", "opciones", "indiceCorrecta"],
+  },
+} as Record<string, unknown>
+
+/** Esquema JSON de subtemas: array plano de strings. */
+const ESQUEMA_SUBTEMAS = {
+  type: "array",
+  items: { type: "string" },
+} as Record<string, unknown>
 
 export async function extraerSubtemas(
   texto: string,
@@ -315,7 +332,13 @@ export async function extraerSubtemas(
   proveedor?: ProveedorNube
 ): Promise<string[]> {
   const prompt = construirPromptSubtemas(texto)
-  const rawText = await llamarModelo({ prompt, modelo, proveedor })
+  const rawText = await llamarModelo({
+    prompt,
+    modelo,
+    proveedor,
+    numPredict: NUM_PREDICT_SUBTEMAS,
+    esquema: ESQUEMA_SUBTEMAS,
+  })
 
   const cleanText = recortarEntre(sinBloquesDeCodigo(rawText), "[", "]")
 
@@ -342,24 +365,20 @@ export async function generarPregunta(
   proveedor?: ProveedorNube,
   preguntasPrevias: string[] = []
 ): Promise<Pregunta> {
-  const prompt = construirPromptPregunta(subtema, textoOriginal, preguntasPrevias)
-  const respuesta = await llamarModelo({ prompt, modelo, proveedor, esperaObjeto: true })
-
-  try {
-    return parsearRespuestaPregunta(respuesta)
-  } catch (error) {
-    console.error("=== RAW MODEL RESPONSE (generarPregunta) ===", respuesta)
-    throw new Error(
-      `Failed to parse model response as JSON: ${error instanceof Error ? error.message : String(error)}`
-    )
-  }
+  // Fase B — se eliminó el camino de "pregunta suelta": ahora delega en el lote y
+  // devuelve la primera. Queda solo por compatibilidad (ya nadie lo importa).
+  const lote = await generarLotePreguntas(subtema, textoOriginal, modelo, proveedor, preguntasPrevias)
+  const primera = lote[0]
+  if (!primera) throw new Error("El modelo no devolvió preguntas")
+  return primera
 }
 
 /**
- * Genera el lote de preguntas de un sub-tema en una sola llamada al modelo.
+ * Genera el lote de preguntas de un sub-tema en UNA sola llamada al modelo.
  * `preguntasPrevias` son las que ya se generaron para ese sub-tema: se le pasan al
- * modelo para que un segundo lote no repita el primero (antes solo lo hacía el prompt
- * de pregunta suelta, así que los lotes de un mismo sub-tema podían solaparse).
+ * modelo para que un segundo lote no repita el primero. Con format=schema el JSON
+ * sale válido a la primera, así que no se reintenta (antes eran 2 llamadas que
+ * duplicaban el tiempo con gemma4:26b ante cualquier coma fuera de lugar).
  */
 export async function generarLotePreguntas(
   subtema: string,
@@ -369,21 +388,23 @@ export async function generarLotePreguntas(
   preguntasPrevias: string[] = []
 ): Promise<Pregunta[]> {
   const prompt = construirPromptLotePreguntas(subtema, textoOriginal, preguntasPrevias)
+  const respuesta = await llamarModelo({
+    prompt,
+    modelo,
+    proveedor,
+    esperaObjeto: false,
+    numPredict: NUM_PREDICT_LOTE,
+    esquema: ESQUEMA_LOTE,
+  })
 
-  const intentos = [prompt, prompt]
-  let ultimaRespuesta = ""
-
-  for (const intento of intentos) {
-    ultimaRespuesta = await llamarModelo({ prompt: intento, modelo, proveedor, esperaObjeto: false })
-    try {
-      const lote = parsearLotePreguntas(ultimaRespuesta)
-      if (lote.length > 0) return lote
-    } catch {
-      // Un modelo chico a veces devuelve un objeto en vez del array: se pide una vez más.
-    }
+  try {
+    const lote = parsearLotePreguntas(respuesta)
+    if (lote.length > 0) return lote
+  } catch {
+    // El schema ya fuerza el formato: si igual falla, se loguea y se corta.
   }
 
-  console.error("=== RAW MODEL RESPONSE (generarLotePreguntas) ===", ultimaRespuesta)
+  console.error("=== RAW MODEL RESPONSE (generarLotePreguntas) ===", respuesta)
   throw new Error("Failed to parse model response as JSON: el lote no tiene preguntas válidas")
 }
 
@@ -449,7 +470,17 @@ Escribí un feedback breve (3-5 oraciones) en español, directo y útil:
 - Escribí en texto plano: sin markdown, sin asteriscos, sin listas ni negritas.
 - Solo mencioná como áreas a reforzar los sub-temas marcados "le falta reforzar". Los marcados "dominado" no los presentes como débiles.`
 
-  const respuesta = (await llamarModelo({ prompt, modelo, proveedor, esperaObjeto: false })).trim()
+  // num_predict topado: el feedback son 3-5 oraciones, no necesita más. Sin tope,
+  // un modelo grande que divaga puede tardar minutos en cerrarse.
+  const respuesta = (
+    await llamarModelo({
+      prompt,
+      modelo,
+      proveedor,
+      esperaObjeto: false,
+      numPredict: NUM_PREDICT_FEEDBACK,
+    })
+  ).trim()
 
   // Algunos modelos ignoran la consigna de texto plano y devuelven markdown igual: se
   // limpian los asteriscos acá, antes de devolver el feedback (y de que el route lo

@@ -33,6 +33,12 @@ export interface ItemHistorial {
   correcta: boolean;
 }
 
+/** Fase B.10 — una pregunta del lote con su id ya guardado: el cliente cachea el resto. */
+export interface LoteItem {
+  preguntaId: number;
+  pregunta: Pregunta;
+}
+
 export interface EstadoSesion {
   id: number;
   tema: string;

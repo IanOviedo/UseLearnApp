@@ -76,6 +76,9 @@ export default function HomePage() {
   const [cargandoModelos, setCargandoModelos] = useState(false);
   const [modeloPrincipal, setModeloPrincipal] = useState(MODELO_PRINCIPAL_POR_DEFECTO);
   const [modeloPreguntas, setModeloPreguntas] = useState(MODELO_PREGUNTAS_POR_DEFECTO);
+  // Fase B.11 — pre-generación del próximo lote en background (solo Ollama local).
+  // Se guarda en localStorage y viaja como ?pregen=0 en los requests del sondeo.
+  const [pregen, setPregen] = useState(true);
   const [proveedores, setProveedores] = useState<ProveedorNube[]>([]);
   const [mostrandoFormProveedor, setMostrandoFormProveedor] = useState(false);
   const [nuevoNombre, setNuevoNombre] = useState("");
@@ -93,11 +96,18 @@ export default function HomePage() {
   useEffect(() => {
     const guardadoPrincipal = localStorage.getItem("uselearn:modeloPrincipal");
     const guardadoPreguntas = localStorage.getItem("uselearn:modeloPreguntas");
-    if (guardadoPrincipal) setModeloPrincipal(guardadoPrincipal);
-    if (guardadoPreguntas) setModeloPreguntas(guardadoPreguntas);
+    const pregenGuardado = localStorage.getItem("uselearn:pregen") !== "0";
     // Se cargan acá y no recién al abrir Ajustes: si no, al crear una sesión con un
     // proveedor de nube elegido el componente no lo tenía en estado y no se mandaba.
-    setProveedores(obtenerProveedores());
+    const proveedoresGuardados = obtenerProveedores();
+    // Un microtask de diferencia: el lint de React castiga el setState sincrono
+    // dentro del efecto (renders en cascada).
+    void Promise.resolve().then(() => {
+      if (guardadoPrincipal) setModeloPrincipal(guardadoPrincipal);
+      if (guardadoPreguntas) setModeloPreguntas(guardadoPreguntas);
+      setPregen(pregenGuardado);
+      setProveedores(proveedoresGuardados);
+    });
   }, []);
 
   async function abrirAjustes() {
@@ -151,6 +161,11 @@ export default function HomePage() {
   function guardarModeloPreguntas(nombre: string) {
     setModeloPreguntas(nombre);
     localStorage.setItem("uselearn:modeloPreguntas", nombre);
+  }
+
+  function guardarPregen(valor: boolean) {
+    setPregen(valor);
+    localStorage.setItem("uselearn:pregen", valor ? "1" : "0");
   }
 
   async function generarQuiz() {
@@ -468,8 +483,41 @@ export default function HomePage() {
                 </>
               )}
             </div>
-             <div className="mt-6">
-               <h3 className="mb-2 text-sm font-medium tracking-tight text-neutral-200">Proveedores de nube configurados</h3>
+
+            <div className="mb-2 mt-6">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-medium text-neutral-200 mb-1">
+                    Pre-generar el próximo lote
+                  </p>
+                  <p className="text-xs text-neutral-500">
+                    Mientras respondés, las preguntas del siguiente sub-tema ya se están
+                    generando en segundo plano: el cambio de tema no corta. Solo con IA
+                    local (Ollama) — en nube se apaga para no gastar tokens.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={pregen}
+                  onClick={() => guardarPregen(!pregen)}
+                  className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors duration-200 ${
+                    pregen
+                      ? "border-neutral-500 bg-neutral-300"
+                      : "border-neutral-800 bg-neutral-900"
+                  }`}
+                >
+                  <span
+                    className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 rounded-full transition-all duration-200 ${
+                      pregen ? "left-6 bg-neutral-900" : "left-1 bg-neutral-600"
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-6">
+              <h3 className="mb-2 text-sm font-medium tracking-tight text-neutral-200">Proveedores de nube configurados</h3>
                {proveedores.length === 0 ? (
                  <p className="text-xs text-neutral-500">No hay proveedores configurados</p>
                ) : (
