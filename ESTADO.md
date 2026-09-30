@@ -1,11 +1,12 @@
-# useLearn — estado real verificado (última pasada: 29/09/2026)
+# useLearn — estado real verificado (última pasada: 30/09/2026)
 
 Este archivo reemplaza al panorama del documento de diseño, que quedó desactualizado.
 No describe lo que *debería* ser: describe lo que **verifiqué** en el repo y en la base
 real, después de cerrar **Fase A (cimientos)**, **Fase B (velocidad)**, **C1**
-(modalidades de entrada), **C2** (rutas y fases persistidas) y **D** (Enseñar/Practicar).
+(modalidades de entrada), **C2** (rutas y fases persistidas), **D** (Enseñar/Practicar)
+y el **filtro de calidad de preguntas** (validación local + juez semántico).
 
-Base de la verificación (HEAD `b6a5fd3` + los cambios locales de esta pasada):
+Base de la verificación (HEAD `71e04b6`):
 
 - Lectura completa de `lib/*`, `app/api/**`, `app/page.tsx`, `app/sondeo/[id]/page.tsx`, `components/**`.
 - Consultas SQL directas a `useLearn.db` (sesiones, subtemas, preguntas, respuestas).
@@ -15,13 +16,18 @@ Base de la verificación (HEAD `b6a5fd3` + los cambios locales de esta pasada):
   `.smoke-fase-cd.ps1` (36 asserts), corridos con `gemma4:e2b` y con el default `gemma4:26b`.
 - `npx tsc --noEmit`, `npm run lint`, `npm run build`.
 
+> **Advertencia de método (30/09):** `tsc` y `build` en verde **no** significan que una
+> feature esté conectada. El juez semántico compilaba perfecto y no se llamaba desde ningún
+> lado: el usuario recibía las preguntas sin filtrar. Ver §10.1. Antes de dar por buena una
+> feature nueva, hay que grepar quién la invoca.
+
 ## 1. Estado por módulo
 
 | Módulo | Archivos | Estado verificado |
 |---|---|---|
 | Ingesta | `app/page.tsx`, `app/api/archivos/extraer-pdf`, `lib/texto.ts` | Texto/md pegado + PDF. El `topic` ya no es `slice(0,50)`: `derivarTema()` saltea encabezados y nombres de archivo (en la base se lee "Challenge: Date Counter (Step + Count + fecha dinámica)"). Falta solo el export a Obsidian y el import de notas (Fase E). Con C1 hay modalidades de entrada (apunte pegado/PDF o tema libre con nivel + objetivo) y confirmación de sub-temas: la landing muestra lo detectado y podés desmarcar lo que no te interesa antes de que arranque el sondeo. |
 | Sub-temas | `lib/ollama.ts::extraerSubtemas` | Usa el modelo y el proveedor elegidos en Ajustes (antes llamaba al default hardcodeado). Manda un head de 3.5k chars, no el PDF entero. |
-| Sondeo | `lib/sondeo.ts`, `app/api/sondeo/*`, `FaseSondeo.tsx` | Un roundtrip por pregunta (merge), caché de lote en memoria, atajos 1-4/Enter, fila respondida compacta memoizada, reanudable al recargar. |
+| Sondeo | `lib/sondeo.ts`, `app/api/sondeo/*`, `FaseSondeo.tsx` | Un roundtrip por pregunta (merge), caché de lote en memoria, atajos 1-4/Enter, fila respondida compacta memoizada, reanudable al recargar. **Desde 30/09 las preguntas pasan por dos filtros de calidad antes de servirse** (ver §10). |
 | Dominio | `lib/db.ts::registrarRespuesta` | Contadores reales (`total_correctas/total_intentos/total_incorrectas`), dominado = 2 aciertos seguidos, `descartada` para lotes abandonados, y la tabla `respuestas` **sí se llena** con la opción elegida. |
 | Estado de sesión | `GET /api/sesiones/[id]`, `lib/tipos.ts` | Fase, progreso, sub-temas con dominio, débiles, sin dominar e historial completo. `sesiones.fase_actual` se persiste (`sondeo` → `plan`). |
 | Plan | `FasePlan.tsx`, `app/api/sesiones/[id]/fase` | Server-driven (reabrir una sesión pasada ya no lo muestra vacío), lista de débiles, lista de "quedaron sin dominar", mapa Mermaid y el paso a Enseñar: la fase se persiste en la base con guard de retroceso. |
@@ -131,52 +137,71 @@ respondidas, feedback en texto plano.
 
 | Fase | Peso | Estado verificado | % interno | Aporte |
 |---|---|---|---|---|
-| 1. Sondeo | 30 | End-to-end con respuestas reales, dominio con contadores reales, reanudable, batching + pre-gen + atajos | 90% | 27.0 |
+| 1. Sondeo | 30 | End-to-end con respuestas reales, dominio con contadores reales, reanudable, batching + pre-gen + atajos, **dos filtros de calidad de preguntas** (local + juez, gateado por preset) | 92% | 27.6 |
 | 2. Plan | 10 | Server-driven y reanudable, débiles + sin dominar, Mermaid por CDN, grafo en estrella, salida a Enseñar con la fase persistida | 85% | 8.5 |
 | 3. Enseñar | 35 | Rutas por sub-tema, material generado y cacheado, quiz + código con assertions, sandbox aislado, aprobados persistidos | 75% | 26.3 |
 | 4. Cerrar | 15 | Pantalla mínima (stepper + feedback); falta la comparativa, la mezcla de preguntas y el export | 20% | 3.0 |
 | Transversal (ajustes, proveedores, historial, ingesta, DB) | 10 | Sólido: gateway, defaults centralizados, DB endurecida, ESLint limpio; sin tests unitarios (hay 2 humos end-to-end), sin modal extraído | 85% | 8.5 |
-| **Total** | 100 | | | **≈ 73 / 100** |
+| **Total** | 100 | | | **≈ 74 / 100** |
 
-Lectura honesta: el **ciclo de diagnóstico** (detectar qué no sabés) está ~90% y el **ciclo de
+Lectura honesta: el **ciclo de diagnóstico** (detectar qué no sabés) está ~92% y el **ciclo de
 aprendizaje** (arreglar lo que no sabés) sigue en 0%. La auditoría previa estimaba ≈37; Fase A y B
 sumaron los ~6 puntos, y esta pasada corrigió cuatro bugs que hacían que los números fueran
 mentira (feedback en JSON, preguntas abandonadas contadas, pre-gen muerta, sub-temas sin evaluar
 invisibles).
 
+**Los +1 del filtro son una estimación con asterisco:** la feature está conectada y compila, pero
+no se midió contra un modelo real (§10.5). Si el juez resulta demasiado estricto y vacía lotes, el
+número es peor, no mejor. Es el único ítem del panorama sin evidencia de runtime.
+
 ## 6. Qué sigue (ordenado por relación valor/riesgo)
 
+**Primero, cerrar el círculo de esta pasada (chico, ~30 min)**
+0. **Probar el juez contra un modelo real** y ajustar el prompt según cuánto descarte (ver §10.5).
+   Es lo único del commit `71e04b6` sin evidencia de runtime, y es el riesgo activo: un juez
+   demasiado estricto vacía lotes y el usuario se queda sin preguntas. Mientras tanto, `rapido`
+   no lo activa, así que hay una salida.
+0b. **Un assert de humo que fije el filtro.** Los dos humos pasan igual porque no ejercitan el
+   juez (es un `opts.juez` inyectado y los humos no lo pasan). Un assert con un juez que rechaza
+   todo, y otro con un juez que lanza, fijarían el comportamiento fail-open.
+
 **Fase C — el Plan de verdad (chica, 1 sesión)**
-1. Botón "Empezar a aprender" en `FasePlan` + `actualizarFaseSesion(id, "ensenar")`: hoy es un
-   callejón sin salida y es lo único que bloquea Fase D.
+1. ~~Botón "Empezar a aprender"~~ ✅ hecho en C2/D (`POST /api/sesiones/[id]/fase`).
 2. Grafo propio en SVG (nodos con el mismo estilo `rounded-2xl border-neutral-800/60`) y sacar
    Mermaid del CDN. Con `respuestas` ya poblada se pueden dibujar **aristas de error** ("elegiste
    la opción de cleanup cuando la pregunta era de dependencias") y el mapa pasa a ser un
-   diagnóstico personalizado.
-3. Stepper persistente Sondeo · Plan · Enseñar · Cerrar arriba de todo.
+   diagnóstico personalizado. **Sigue igual:** `MERMAID_CDN` sigue siendo un `<script>` remoto
+   (`components/sondeo/FasePlan.tsx:9,164`) y el grafo sigue en estrella.
+3. Stepper persistente Sondeo · Plan · Enseñar · Cerrar arriba de todo. **Sigue igual:** no hay
+   stepper en `app/sondeo/[id]/page.tsx` (139 líneas, sin referencia).
 4. Regla de dominio real: mínimo 3 intentos por sub-tema antes de poder dominarlo (hoy se domina
-   con 2 aciertos/2 intentos) + `proximo_repaso` para el repaso espaciado.
+   con 2 aciertos/2 intentos, `ACIERTOS_SEGUIDOS_PARA_DOMINAR`) + `proximo_repaso` para el repaso
+   espaciado. **Sigue igual:** `proximo_repaso` no existe en `lib/db.ts`; solo la constante de
+   2 aciertos en `db.ts:590`.
 
-**Fase D — Enseñar (la grande)**
-5. Tablas `explicaciones`, `ejercicios`, `intentos_ejercicio` (mismo patrón de migración que ya
-   usa `lib/db.ts`).
-6. 3 explicaciones + 1 ejercicio por sub-tema débil, con el mismo patrón de lote + JSON Schema que
-   ya funciona para las preguntas.
-7. CodeMirror 6 + runner en `iframe sandbox="allow-scripts"` con assertions.
-8. Explicación anclada al error concreto: la opción elegida ya se guarda, así que "elegiste X, la
-   correcta era Y, por esto" es posible sin llamadas extra.
+**Fase D — Enseñar (cerrada en su mayor parte)**
+5. ~~Tablas `explicaciones`, `ejercicios`, `intentos_ejercicio`~~ ✅ en `lib/db.ts`.
+6. ~~Explicaciones + ejercicios por sub-tema con lote + JSON Schema~~ ✅ `lib/aprender.ts`.
+7. ~~CodeMirror 6 + runner en `iframe sandbox="allow-scripts"`~~ ✅ `components/aprender/*`.
+8. Explicación anclada al error concreto. **Parcial:** la opción elegida ya se guarda, así que
+   el dato está; falta la pieza que lo use en la pantalla de Enseñar.
 
-**Fase E — Cerrar y largo plazo**
+**Fase E — Cerrar y largo plazo (nada empezado)**
 9. Pantalla de cierre (comparativa, mapa completo, mezcla de preguntas, próximo tema).
+   **Verificado:** `FaseCierre.tsx` sigue con el stepper + feedback, y el comentario de la línea 7
+   dice que el export y el repaso se agregan ahí.
 10. Export a Obsidian (`.md` con bloque `mermaid` + debilidades + ejercicios con soluciones).
+    **Verificado:** cero referencias a "obsidian" en `app/` y `lib/`.
 11. Repaso espaciado en la landing: los lotes abandonados ya son material (18 filas descartadas
-    en una sola sesión de prueba).
+    en una sola sesión de prueba). Depende de `proximo_repaso` (Fase C, punto 4).
 12. Import desde la carpeta de notas con `fs` (solo lectura, whitelist).
 
 **Deuda técnica**
-13. Extraer `ModalAjustes` de `app/page.tsx` (hoy 645 líneas, ~250 de JSX del modal).
-14. Tests automatizados (hoy 0): al menos `lib/texto.ts`, `lib/db.ts::registrarRespuesta` y el
-    armado de payloads de `servirSiguiente`.
+13. Extraer `ModalAjustes` de `app/page.tsx`. **Creció:** el texto decía 645 líneas; ahora son
+    **886**. El modal ya no es el único problema del archivo.
+14. Tests automatizados (hoy 0): al menos `lib/texto.ts`, `lib/db.ts::registrarRespuesta`,
+    el armado de payloads de `servirSiguiente` y **`lib/validacion.ts`** (comparar strings es
+    barato de testear y es la capa que más riesgos de regresión tiene).
 15. Botón "esta pregunta está mal" (descarta y regenera el sub-tema).
 16. Modos de estudio (tema libre, desafío de código, error/stack trace, repaso) sobre las mismas
     tablas + un campo `modo`.
@@ -185,16 +210,24 @@ invisibles).
 
 ## 7. Límites y riesgos conocidos
 
+- **El juez semántico puede ser demasiado estricto (nuevo, sin medir).** Si rechaza mucho, el
+  lote se vacía y `generarLotePreguntas` tira `el lote no tiene preguntas válidas`: el usuario
+  se queda sin pregunta. Mitigaciones ya puestas: fail-open por pregunta, fail-open por lote, y
+  el preset `rapido` no lo activa. Falta medirlo (§10.5).
+- **Coste y latencia del juez:** son N llamadas extra por lote (una por pregunta), en paralelo.
+  Con `gemma4:26b` en local eso puede ser más lento que generar el lote mismo. No hay medición.
 - **Pre-generación vs velocidad del usuario:** si respondés más rápido de lo que tarda el modelo,
   el lote llega tarde igual (medido: 5,1 s vs 8 ms de transición). Con `gemma4:26b` una transición
   puede seguir tardando aunque el resto del sondeo sea instantáneo.
 - **Contienda por la GPU:** si la pre-generación y el pedido en primer plano coinciden, el pedido
   que esperás vos tarda más (se vio: 5,1 s con el modelo ocupado vs 2,6 s solo). En una sesión de
   prueba quedaron 2 lotes completos descartados por esa carrera; la pre-generación no duplica filas
-  (re-chequeo post-generación) pero puede gastar una llamada.
+  (re-chequeo post-generación) pero puede gastar una llamada. **Por esto el juez no corre en la
+  pre-gen:** habría summedo N llamadas más a esa misma carrera.
 - **Tope de 20 respuestas:** con muchos sub-temas el sondeo puede cerrar por el tope sin evaluarlos
   a todos; ahora eso se ve como "quedaron sin dominar" en vez de pasar por "dominado".
 - **Sin tests:** toda la verificación de esta pasada fue manual + scripts temporales (borrados).
+  Los 2 humos no cubren el filtro de preguntas (§10.5).
 - **Enseñar todavía no está verificado en el navegador:** los humos cubren API, persistencia y
   caché, pero CodeMirror, el `iframe sandbox` y los cambios de pantalla solo se probaron a mano.
 - **El par js/jsx depende del modelo:** `gemma4:26b` lo devuelve (verificado), `gemma4:e2b` tiende a
@@ -279,6 +312,87 @@ explícito en el server y en el helper) y **borran la sesión que crean**: tu `u
 - **Sin "dame más ejercicios":** el bloque genera una vez y cachea; no hay botón para pedir otro ejercicio
   del mismo sub-tema (el parámetro `ejerciciosPrevios` ya está listo para eso).
 - **Sin tests unitarios ni de UI:** todo lo de esta sección es API + base; el navegador se prueba a mano.
+
+
+## 10. Filtro de calidad de preguntas (30/09/2026, commit `71e04b6`)
+
+Hasta esta pasada, una pregunta llegaba al usuario si el modelo devolvía JSON parseable. No
+había ninguna verificación de contenido: una pregunta con la respuesta correcta marcada en
+el lugar equivocado, o cuya explicación no tenía nada que ver, se servía igual.
+
+### 10.1 El bug de fondo: la feature compilaba pero no estaba conectada
+
+`lib/evaluador.ts` existía y `npx tsc --noEmit` daba **0 errores**. El problema es que
+`evaluarCalidadSemantica` **no se llamaba desde ningún lado** (verificado con grep sobre todo
+el repo: la única coincidencia era su propia declaración). El "filtro de inteligencia" era
+código muerto compilado.
+
+Peor: al intentar importarlo en `ollama.ts` se había generado un **import circular**
+(`ollama.ts` importándose a sí mismo, más imports duplicados de `Pregunta` y `validarLote`).
+TypeScript lo marcaba con `TS2440`/`TS2300`, que son los 13 errores que aparecieron al
+arrancar esta pasada.
+
+**Lección que queda escrita:** tipos en verde y build en verde no prueban que una feature
+funcione. Hay que grepar quién la invoca. El build verifica que el código *anda*, no que
+*se use*.
+
+### 10.2 Qué hay ahora
+
+| Capa | Dónde | Qué descarta | Costo |
+|---|---|---|---|
+| Validación local | `lib/validacion.ts` | stem pobre, cantidad de opciones inválida, comodines "todas/ninguna", opciones duplicadas, longitudes desbalanceadas (≥3×), explicación vacía, y parecido por similitud contra el lote **y** contra todo lo ya visto en la sesión | ~0 (compara strings) |
+| Juez semántico | `lib/evaluador.ts` | veracidad contra el texto, enunciado ambiguo, pregunta no respondible con el texto, explicación que contradice la respuesta | 1 llamada por pregunta |
+
+`distribucionSospechosa` completa el conjunto: si la correcta cae siempre en el mismo lugar,
+`distribuirLote` mezcla las posiciones para que el usuario aprenda el tema y no el índice.
+
+**Orden de ejecución:** la validación local corre primero y el juez solo mira lo que ya la
+pasó, así que el juez nunca ve basura y sus tokens van a lo que la heurística no puede ver.
+El juez corre en paralelo (`Promise.all` sobre `juzgarLote`), no en serie: son N llamadas
+independientes.
+
+**Gate por preset** (`AjustesCalidad.juezSemantico`): `rapido: false`, `equilibrado: true`,
+`profundo: true`. El juez cuesta una llamada por pregunta, y en `rapido` el usuario pidió
+espera mínima. Con `rapido` el lote se sirve con la validación local sola, como antes.
+
+### 10.3 Decisiones de diseño que conviene no revertir
+
+- **Inyección por callback, no import.** `generarLotePreguntas` acepta `juez?` en `opts` y
+  `sondeo.ts` le pasa `juzgarLote`. Importar `evaluador` desde `ollama` cerraría el ciclo
+  (§10.1). El callback además hace que `ollama.ts` no sepa nada del juez.
+- **Fail-open en dos niveles.** Si el juez individual falla, la pregunta se acepta (ya pasó
+  el filtro barato). Si falla el lote entero, se sigue sin juez. Servir una pregunta dudosa es
+  mejor que dejar al usuario sin lote por un fallo del verificador. Ambos catches están
+  comentados con el porqué.
+- **Sin juez en la pre-generación.** `lanzarPregenSiConviene` corre en background contra el
+  mismo Ollama local que está por servir la pregunta que el usuario espera; N llamadas extra
+  competirían por la GPU y atrasarían el foreground, que es justo lo que la pre-gen evita.
+
+### 10.4 Bugs corregidos de paso en el evaluador
+
+- **Mandaba el documento entero** (~50k de un PDF) en cada evaluación. Ahora usa
+  `extraerExcerpt` con `EXCERPT_MAX_CHARS`, igual que el prompt del lote.
+- **`type: ["string", "null"]` no es JSON Schema válido.** Varios proveedores OpenAI-compatibles
+  lo rechazan al validar el esquema. Ahora `anyOf: [{type:"string"},{type:"null"}]`.
+- **`!!parsed.valida` daba por válida una pregunta rechazada.** Si el modelo devolvía `"false"`
+  como string, es truthy y la pregunta pasaba. Ahora `parsed.valida === true`.
+- **Extracción del texto real de la opción correcta** en el prompt: antes solo mandaba el
+  índice, así que el juez juzgaba sin ver qué se-lo-estaba-presentando-como-correcto.
+
+### 10.5 Qué NO está verificado (límite honesto)
+
+- **El juez no se probó contra un modelo real.** Solo hay `tsc` y `build`. No hay medición de
+  cuánto descarta, ni de si los motivos que devuelve son útiles, ni de si es demasiado estricto
+  (un juez que rechaza de más deja al usuario sin lote).
+- **Los humos no cubren esta capa.** `.smoke-c1.ps1` y `.smoke-fase-cd.ps1` siguen pasando
+  porque no ejercitan el juez; el `opts.juez` es inyectado y los humos no lo pasan.
+- **No hay tests del comportamiento fail-open**: que un juez caído no rompa el flujo está
+  sostenido por lectura del código y los `catch`, no por una prueba.
+
+**Siguiente paso concreto:** una corrida manual en preset `equilibrado` con Ollama arriba,
+mirando `[lote] descartada por el juez` en el log. Si descarta más del ~50% del lote, el
+prompt del juez está demasiado estricto y hay que relajarlo.
+
 
 
 
