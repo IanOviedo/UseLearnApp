@@ -154,6 +154,14 @@ invisibles).
 no se midió contra un modelo real (§10.5). Si el juez resulta demasiado estricto y vacía lotes, el
 número es peor, no mejor. Es el único ítem del panorama sin evidencia de runtime.
 
+**El filtro de calidad NO mueve el total por arriba de 74.** Mejora el diagnóstico, no el
+aprendizaje, y el diagnóstico ya estaba ponderado por su propio peso. Inflar el total por una
+feature que solo hace más riguroso el mismo flujo sería mentir sobre el estado del producto.
+
+Lo que sí cambió en esta lectura: el ciclo de aprendizaje sigue en 0% pero **ahora con causa
+identificada** (§11.1: la app no tiene memoria entre sesiones) en vez de ser un vacío sin
+diagnóstico. Eso es progreso real: el problema dejó de ser invisible.
+
 ## 6. Qué sigue (ordenado por relación valor/riesgo)
 
 **Primero, cerrar el círculo de esta pasada (chico, ~30 min)**
@@ -172,12 +180,15 @@ número es peor, no mejor. Es el único ítem del panorama sin evidencia de runt
    la opción de cleanup cuando la pregunta era de dependencias") y el mapa pasa a ser un
    diagnóstico personalizado. **Sigue igual:** `MERMAID_CDN` sigue siendo un `<script>` remoto
    (`components/sondeo/FasePlan.tsx:9,164`) y el grafo sigue en estrella.
-3. Stepper persistente Sondeo · Plan · Enseñar · Cerrar arriba de todo. **Sigue igual:** no hay
-   stepper en `app/sondeo/[id]/page.tsx` (139 líneas, sin referencia).
+3. ~~Stepper persistente Sondeo · Plan · Enseñar · Cerrar~~ ✅ **ya existía**:
+   `components/ui/Stepper.tsx`, usado en las tres fases (`FasePlan:193`, `FaseEnsenar:194`,
+   `FaseCierre:25`). *Corrección (30/09): una versión anterior de este documento lo daba por
+   pendiente. Se verificó con grep que estaba mal: el error fue buscar "stepper" en
+   `app/sondeo/[id]/page.tsx` (el orquestador de fases, que solo delega) y no en `components/`.*
 4. Regla de dominio real: mínimo 3 intentos por sub-tema antes de poder dominarlo (hoy se domina
-   con 2 aciertos/2 intentos, `ACIERTOS_SEGUIDOS_PARA_DOMINAR`) + `proximo_repaso` para el repaso
-   espaciado. **Sigue igual:** `proximo_repaso` no existe en `lib/db.ts`; solo la constante de
-   2 aciertos en `db.ts:590`.
+   con 2 aciertos/2 intentos, `ACIERTOS_SEGUIDOS_PARA_DOMINAR`). **Sigue igual.**
+   `proximo_repaso` salió de acá: pasa a ser parte de la Fase 2 de §11 (repaso espaciado),
+   porque necesita la tabla `conceptos` para tener sentido.
 
 **Fase D — Enseñar (cerrada en su mayor parte)**
 5. ~~Tablas `explicaciones`, `ejercicios`, `intentos_ejercicio`~~ ✅ en `lib/db.ts`.
@@ -193,7 +204,8 @@ número es peor, no mejor. Es el único ítem del panorama sin evidencia de runt
 10. Export a Obsidian (`.md` con bloque `mermaid` + debilidades + ejercicios con soluciones).
     **Verificado:** cero referencias a "obsidian" en `app/` y `lib/`.
 11. Repaso espaciado en la landing: los lotes abandonados ya son material (18 filas descartadas
-    en una sola sesión de prueba). Depende de `proximo_repaso` (Fase C, punto 4).
+    en una sola sesión de prueba). **Reenrutado a §11.2-11.3**: es la Fase 2 del plan de
+    memoria, no un ítem suelto de Fase E.
 12. Import desde la carpeta de notas con `fs` (solo lectura, whitelist).
 
 **Deuda técnica**
@@ -394,8 +406,120 @@ mirando `[lote] descartada por el juez` en el log. Si descarta más del ~50% del
 prompt del juez está demasiado estricto y hay que relajarlo.
 
 
+## 11. La app olvida: plan de memoria y repaso espaciado (30/09/2026, planificado)
 
+Esta sección es **plan, no estado verificado**. Es lo que sigue después del filtro de calidad de
+§10, y el orden está justificado en §11.8.
 
+### 11.1 Diagnóstico: por qué el ciclo de aprendizaje está en 0%
 
+    Select-String 'proximo_repaso|intervalo|facilidad|repetir' lib/db.ts  →  0 resultados
 
+No existe `proximo_repaso`, ni intervalos, ni registro de práctica. Y el motivo de fondo es
+estructural: **cada `subtemas` es una fila de una sola sesión** (`subtemas.sesion_id`). "Closures"
+en la sesión 1 y "Closures" en la sesión 8 son dos filas sin relación entre sí, porque la noción
+de "concepto" que sobreviva entre sesiones no existe.
+
+Consecuencia: se estudia un concepto, se cierra la sesión, y la app **no lo vuelve a mencionar**.
+Al volver, el sondeo pregunta de cero lo que ya se sabía.
+
+**Por qué esto va primero y no una feature más.** Con la app como está, agregar repaso espaciado,
+progreso o videos produce adornos sobre una base que no recuerda. La memoria es condición de
+existencia de todo lo demás.
+
+### 11.2 Fase 1 — Memoria entre sesiones (primera entrega, va sola)
+
+Se entrega **separada** de la Fase 2 a propósito: hay que poder verificar que un concepto persiste
+entre sesiones antes de construirle repaso encima. Juntas, que "funcionen" no distingue "la memoria
+funciona" de "el repaso funciona".
+
+| Pieza | Diseño | Ancla en el código existente |
+|---|---|---|
+| Tabla `conceptos` | `id`, `nombre`, `nombre_normalizado UNIQUE`, `veces_visto`, `primera_vez`, `ultima_vez`, `veces_acierto`, `veces_fallo`, `ultimo_resultado` | mismo patrón `CREATE TABLE IF NOT EXISTS` + `CREATE INDEX` del resto de `lib/db.ts` |
+| Vínculo | `subtemas.concepto_id INTEGER REFERENCES conceptos(id)` | `asegurarColumna(...)` — la migración idempotente ya existe (`db.ts:114`) |
+| Upsert de concepto | por `nombre_normalizado`, **determinista, sin LLM** | `normalizarParaSimilitud` ya existe en `lib/texto.ts` |
+| Historial de dominio | `veces_acierto` / `veces_fallo` / `ultimo_resultado` se actualizan al responder | los contadores por sub-tema ya viven en `registrarRespuesta` |
+
+**El punto de escritura es único:** `agregarSubtema()` (`db.ts:305`) es el único lugar del repo
+que inserta en `subtemas`. Ahí se resuelve o crea el concepto antes del INSERT, así que toda
+sesión nueva queda enlazada **sin tocar el resto del flujo**. Es la diferencia entre un cambio
+acotado y uno que invade el sondeo entero.
+
+**Decisión, a no revertir: la deduplicación es por nombre normalizado, no por LLM.** Es gratis,
+determinista, y su falla es visible y corregible. La alternativa (preguntarle al modelo si dos
+temas son el mismo) es más flexible pero cuesta una llamada por sub-tema, no es determinística —o
+sea, no se puede testear— y su error es silencioso. Para una app que tiene que "quedar perfecta",
+el error silencioso es peor que el error visible.
+
+**Lo que NO hace la Fase 1:** la interfaz no cambia. No hay pantalla nueva ni botón. Es
+infraestructura invisible, verificable por SQL.
+
+**Cómo se verifica:** crear dos sesiones con material que comparta sub-temas y comprobar que
+aparece **un** concepto con `veces_visto = 2` y dos filas de `subtemas` apuntando al mismo
+`concepto_id`.
+
+### 11.3 Fase 2 — Repaso espaciado (después de verificar la Fase 1)
+
+- Algoritmo **Leitner de 3 cajas** (1d / 3d / 7d): acierto sube de caja, fallo vuelve a la
+  primera. Simple, progresivo y predecible — no una caja negra que nadie puede depurar.
+- `conceptos.proximo_repaso` (con `asegurarColumna`) + `GET /api/repaso` con los conceptos vencidos.
+- La landing muestra **"Te tocan 3 conceptos"** antes de generar nada: es el momento donde la app
+  deja de esperar que la trabaje y empieza a dirigirla.
+- Al crear una sesión, los sub-temas que ya existen como concepto entran priorizados, y
+  `preguntasPrevias` se alimenta con la historia del concepto: se practica **lo que se está
+  olvidando**, no lo que salió bien.
+
+### 11.4 Fase 3 — Progreso visible
+
+Historial **por concepto**, no por sesión: "Closures: 3 sesiones, dominado en la última, próximo
+repaso mañana". Hoy `listarSesionesConEstado` solo lista sesiones sueltas: no hay ninguna vista
+longitudinal.
+
+### 11.5 Fase 4 — Videos por concepto (riesgo alto, va después de la memoria)
+
+**Advertencia de diseño, la más importante de esta sección:** un LLM que "recomienda videos"
+devuelve URLs plausibles que **no existen** o que son de otro tema. Es el modo de falla más
+probable de la feature y el peor posible — si el usuario hace clic y le da 404, descree de toda
+la app.
+
+Por eso el diseño acordado invierte el orden de confianza: **catálogo curado + búsqueda, nunca
+URLs generadas.**
+
+- `lib/recursos.ts`: catálogo de **10 recursos** de JS/React verificados a mano (título, tema,
+  tags, URL). Diez verificados antes que cincuenta confiados en el modelo.
+- El modelo, como mucho, propone **términos de búsqueda**; la app construye un link de búsqueda
+  (`youtube.com/results?search_query=...`), que **no se puede romper**.
+- Match por `nombre_normalizado` del concepto. Sin match → link de búsqueda, el fallback infinito.
+
+### 11.6 Fase 5 — Verificar el juez con modelo chico
+
+Cierra el riesgo abierto de §10.5: correr el juez con el modelo más chico, medir cuánto descarta,
+y relajar el prompt si vacía lotes. Es la fase más chica y la que menos riesgo agrega.
+
+### 11.7 Regla de pruebas: siempre el modelo más chico
+
+Vigente para todo lo de esta sección y para cualquier trabajo futuro:
+
+- **Usar `gemma3:4b` (3.1 GB) o `gemma4:e2b` (6.7 GB)** para toda verificación.
+- Lo que se prueba es **plumbing, formato, parsing y fallbacks**, no calidad de contenido. Un
+  modelo chico falla más, y para verificar que el parser y el fail-open aguantan salida mala, un
+  modelo que falla más es exactamente el que se quiere.
+- Si la salida con `gemma3:4b` es válida, con un modelo grande también lo será.
+- **Lo que esto NO garantiza:** que un modelo grande produzca mejores preguntas. Solo garantiza
+  que formato y lógica aguantan. La calidad del contenido es otro eje y se mide aparte.
+
+Además (§6, punto 17): el default de preguntas sigue siendo `gemma4:26b` (17 GB) cuando
+`gemma4:e2b` (6.7 GB) alcanza. Bajarlo es ganar 10 GB de VRAM sin perder nada medible.
+
+### 11.8 Orden y por qué
+
+| Fase | Qué desbloquea | Riesgo |
+|---|---|---|
+| 1. Memoria (`conceptos`) | todo lo demás depende de esto | Bajo: `ALTER` idempotente, datos intactos, un solo punto de escritura |
+| 2. Repaso espaciado | la app empieza a dirigirte en vez de esperar | Medio: algoritmo nuevo, pero aislado y testeable |
+| 3. Progreso visible | motivación y confianza | Bajo: es leer lo ya persistido |
+| 4. Videos | lo pedido explícitamente | Medio-alto con URLs generadas; bajo con catálogo curado |
+| 5. Verificar el juez | cierra el riesgo abierto | Bajo |
+
+Las Fases 1-3 son el corazón. Sin memoria, 4 y 5 son adornos sobre una app que olvida.
 
