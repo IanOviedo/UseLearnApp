@@ -3,6 +3,7 @@
 // al modelo manda esta config en el body/query. Vive acá y no en `lib/config.ts` para
 // que ese archivo siga siendo importable desde el server sin tocar APIs del navegador.
 
+import { normalizarPreset, PRESET_POR_DEFECTO, type PresetCalidad } from "./config";
 import { proveedorDeModelo, type ProveedorNube } from "./proveedores";
 
 export interface ConfigLocal {
@@ -12,6 +13,8 @@ export interface ConfigLocal {
   proveedorPrincipal: ProveedorNube | null;
   /** Fase B.11 — el usuario puede apagar la pre-generación desde Ajustes. */
   pregen: boolean;
+  /** Cuánta calidad puede costar tiempo: rapido | equilibrado | profundo. */
+  preset: PresetCalidad;
 }
 
 /** Lee toda la config del localStorage en un solo lugar. */
@@ -30,5 +33,6 @@ export function leerConfigLocal(): ConfigLocal {
     proveedorPreguntas: proveedorDeModelo(proveedores, modeloPreguntas),
     proveedorPrincipal: proveedorDeModelo(proveedores, modeloPrincipal),
     pregen: localStorage.getItem("uselearn:pregen") !== "0",
+    preset: normalizarPreset(localStorage.getItem("uselearn:preset") ?? PRESET_POR_DEFECTO),
   };
 }

@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Server de pruebas de los humos (mismo distDir alternativo, ver next.config.ts):
+    // si no, ESLint lintea el bundle compilado y tira cientos de errores ajenos.
+    ".next-smoke/**",
   ]),
 ]);
 

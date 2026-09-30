@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { crearSesion, agregarSubtema } from "@/lib/db";
 import { extraerSubtemas, generarApunteDeTema } from "@/lib/ollama";
-import { MODELO_PRINCIPAL_POR_DEFECTO } from "@/lib/config";
+import { MODELO_PRINCIPAL_POR_DEFECTO, normalizarPreset } from "@/lib/config";
 import { proveedorDesdeParams } from "@/lib/proveedores";
 import { derivarTema } from "@/lib/texto";
 import type { NivelSesion, ProveedorPayload } from "@/lib/tipos";
@@ -22,6 +22,9 @@ export async function POST(request: NextRequest) {
     const objetivo: string | undefined =
       typeof body.objetivo === "string" && body.objetivo.trim() ? body.objetivo.trim() : undefined;
     const nivel: NivelSesion = NIVELES_VALIDOS.includes(body.nivel) ? body.nivel : "intermedio";
+    // Cuánta calidad puede costar tiempo: lo elige el usuario en Ajustes (rapido por
+    // compatibilidad si no manda nada, que es el comportamiento de siempre).
+    const preset = normalizarPreset(body.preset);
 
     let textoFuente: string;
     let topic: string;
@@ -53,7 +56,9 @@ export async function POST(request: NextRequest) {
 
     // El modelo elegido en Ajustes ahora sí se usa para extraer los sub-temas: antes se
     // ignoraba y siempre se llamaba al default hardcodeado. Queda guardado en la sesión.
-    const subtemas = await extraerSubtemas(textoFuente, modelo, proveedor);
+    // El material se parte en bloques (ver `extraerSubtemas`) para que el final del
+    // documento cuente: antes solo se miraba el head y salían pocos sub-temas.
+    const { subtemas, bloques } = await extraerSubtemas(textoFuente, modelo, proveedor, preset);
 
     if (subtemas.length === 0) {
       return NextResponse.json(
@@ -68,6 +73,10 @@ export async function POST(request: NextRequest) {
       sesionId,
       topic,
       modo,
+      preset,
+      // Cobertura del análisis: la landing avisa cuando el material era largo y salieron
+      // pocos sub-temas (antes el modelo solo veía el principio).
+      analisis: { bloques, textoChars: textoFuente.length, subtemas: subtemas.length },
       // Solo el modo tema libre devuelve el apunte: es material de estudio nuevo que la
       // landing muestra para revisar antes de arrancar el sondeo.
       ...(apunteGenerado ? { apunte: apunteGenerado } : {}),

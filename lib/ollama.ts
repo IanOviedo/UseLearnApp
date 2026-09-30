@@ -1,6 +1,7 @@
 import {
+  ajustesDePreset,
+  CHARS_POR_SUBTEMA,
   EXCERPT_MAX_CHARS,
-  MAX_SUBTEMAS,
   MODELO_GEMINI,
   MODELO_NUBE_POR_DEFECTO,
   MODELO_PREGUNTAS_POR_DEFECTO,
@@ -18,7 +19,13 @@ import {
 } from "./config"
 import type { ProveedorNube } from "./proveedores"
 import type { Pregunta } from "./tipos"
-import { extraerExcerpt, headPorParrafo } from "./texto"
+import {
+  deduplicarPorSimilitud,
+  dividirEnBloques,
+  extraerExcerpt,
+  ordenarPorAparicion,
+  tokensSignificativos,
+} from "./texto"
 
 // --- Gateway de modelos -----------------------------------------------------
 //
@@ -284,18 +291,73 @@ async function fetchGeminiConReintento(url: string, body: string): Promise<Respo
   return primero
 }
 
-export function construirPromptSubtemas(texto: string, excerpt?: string): string {
-  // Fase B.9 — se manda el head (3.5k) en vez del texto entero: extraer subtemas
-  // no necesita el PDF completo y el 26b lo procesa ~10x más rápido.
-  const fuente = (excerpt ?? headPorParrafo(texto)).slice(0, 4000)
+/**
+ * Llamadas de extracción de sub-temas en paralelo: 2 alcanza para cubrir un documento
+ * grande sin pelearse con el pedido en primer plano (la GPU es una sola).
+ */
+const SUBTEMAS_CONCURRENCIA = 2
+
+/**
+ * Prompt de extracción por bloque. Antes se mandaba solo el head de 3.5k chars, así que
+ * en un apunte largo el modelo nunca veía el final y los sub-temas salían todos del
+ * principio (y encima pocos). Ahora el texto se parte en bloques y cada llamada sabe qué
+ * fragmento mira, cuántos bloques hay y qué se le pide exactamente.
+ */
+export function construirPromptSubtemas(
+  bloque: string,
+  opts: { indice: number; total: number; maxPorBloque: number }
+): string {
+  const contexto =
+    opts.total > 1
+      ? `Este es el fragmento ${opts.indice} de ${opts.total} del material: mirá SOLO este fragmento.`
+      : "Este es el material completo."
   return `TEXTO:
 """
-${fuente}
+${bloque}
 """
 
-TAREA: Extraé hasta ${MAX_SUBTEMAS} sub-temas principales del TEXTO de arriba.
-Respondé SOLO con un array JSON de strings cortos en español (2 a 6 palabras).
-Ejemplo: ["useState básico", "useEffect y dependencias", "props vs state"].`
+TAREA: Extraé hasta ${opts.maxPorBloque} sub-temas de estudio de ESTE fragmento. ${contexto}
+Reglas:
+- Cada sub-tema es UN concepto evaluable por separado (nada de títulos generales del documento ni "introducción").
+- Entre 2 y 6 palabras, en español, con los términos que usa el texto.
+- Prohibido repetir o reformular lo mismo: si dos candidatos se estudian con el mismo fragmento del texto, es UN sub-tema, no dos. Nada de variantes con sinónimos.
+- Es mejor devolver menos sub-temas que rellenar con sinónimos: si el fragmento no da para ${opts.maxPorBloque}, devolvé solo los que se sostienen.
+- No inventes conceptos que no estén en el fragmento.
+Respondé SOLO con un array JSON de strings.`
+}
+
+/**
+ * Pasada de cobertura: se usa cuando los bloques no alcanzaron para el objetivo del
+ * preset. Mira el inicio y el final del documento (el final es justo lo que la versión
+ * anterior nunca leía) y pide conceptos que NO estén ya en la lista.
+ */
+export function construirPromptSubtemasCobertura(opts: {
+  fuente: string
+  yaDetectados: string[]
+  cuantos: number
+}): string {
+  const ya =
+    opts.yaDetectados.length > 0
+      ? `\nSub-temas YA detectados (no los repitas ni los reformules):\n${opts.yaDetectados
+          .map((subtema, i) => `${i + 1}. ${subtema}`)
+          .join("\n")}\n`
+      : ""
+  return `TEXTO (inicio y final del material):
+"""
+${opts.fuente}
+"""
+${ya}
+TAREA: Mirá el material y listá hasta ${opts.cuantos} conceptos importantes que NO estén en la lista de arriba.
+- Entre 2 y 6 palabras, en español, con los términos del texto.
+- Tienen que ser evaluables por separado (nada de títulos generales) y distintos entre sí: nada de variantes con sinónimos del mismo concepto.
+Respondé SOLO con un array JSON de strings. Si no hay conceptos nuevos, respondé [].`
+}
+
+/** Inicio + final del documento: barato y cubre el extremo que antes se perdía. */
+function fuenteParaCobertura(texto: string): string {
+  const limpio = texto.replace(/\r/g, "").trim()
+  if (limpio.length <= 3200) return limpio
+  return `${limpio.slice(0, 1300).trim()}\n...\n${limpio.slice(-1800).trim()}`
 }
 
 /** Lista anti-repetición para el prompt de lote (solo enunciados, sin JSON). */
@@ -347,36 +409,161 @@ const ESQUEMA_SUBTEMAS = {
   items: { type: "string" },
 } as Record<string, unknown>
 
-export async function extraerSubtemas(
-  texto: string,
-  modelo: string = MODELO_PRINCIPAL_POR_DEFECTO,
+/** Limpia un sub-tema crudo del modelo: sin numeración ni comillas, tope de 6 palabras. */
+function limpiarSubtema(crudo: string): string {
+  const sinRuido = crudo
+    .replace(/^\s*(?:[-*•]|\d+[.)])\s*/, "")
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+  const palabras = sinRuido.split(" ")
+  return palabras.length > 6 ? palabras.slice(0, 6).join(" ") : sinRuido
+}
+
+/** Parsea la respuesta como lista de sub-temas limpios. Tira si el JSON no es un array. */
+function parsearListaSubtemas(rawText: string): string[] {
+  const limpio = recortarEntre(sinBloquesDeCodigo(rawText), "[", "]")
+  const parsed = JSON.parse(limpio)
+  if (!Array.isArray(parsed)) {
+    throw new Error("La respuesta del modelo no es un array JSON.")
+  }
+  return (parsed as unknown[])
+    .filter((subtema): subtema is string => typeof subtema === "string")
+    .map(limpiarSubtema)
+    .filter((subtema) => subtema.length > 1 && tokensSignificativos(subtema).length > 0)
+}
+
+/** Una llamada de extracción. El prompt lo arma el llamador (bloque o cobertura). */
+async function pedirSubtemas(args: {
+  prompt: string
+  modelo: string
   proveedor?: ProveedorNube
-): Promise<string[]> {
-  const prompt = construirPromptSubtemas(texto)
+}): Promise<string[]> {
   const rawText = await llamarModelo({
-    prompt,
-    modelo,
-    proveedor,
+    prompt: args.prompt,
+    modelo: args.modelo,
+    proveedor: args.proveedor,
     numPredict: NUM_PREDICT_SUBTEMAS,
     esquema: ESQUEMA_SUBTEMAS,
   })
-
-  const cleanText = recortarEntre(sinBloquesDeCodigo(rawText), "[", "]")
-
   try {
-    const subtemas = JSON.parse(cleanText)
-    if (!Array.isArray(subtemas)) {
-      throw new Error("La respuesta del modelo no es un array JSON.")
-    }
-    return (subtemas as unknown[])
-      .filter((subtema): subtema is string => typeof subtema === "string" && subtema.trim().length > 0)
-      .slice(0, MAX_SUBTEMAS)
+    return parsearListaSubtemas(rawText)
   } catch (error) {
     console.error("=== RAW MODEL RESPONSE (extraerSubtemas) ===", rawText)
-    throw new Error(
-      `Failed to parse model response as JSON: ${error instanceof Error ? error.message : String(error)}`
+    throw error
+  }
+}
+
+/** Corre `fn` sobre todos los items con un tope de llamadas en paralelo (la GPU es una). */
+async function mapearConLimite<T, R>(
+  items: T[],
+  limite: number,
+  fn: (item: T, indice: number) => Promise<R>
+): Promise<R[]> {
+  const resultados: R[] = new Array(items.length)
+  let proximo = 0
+  const trabajadores = Array.from(
+    { length: Math.max(1, Math.min(limite, items.length)) },
+    async () => {
+      for (let indice = proximo++; indice < items.length; indice = proximo++) {
+        resultados[indice] = await fn(items[indice], indice)
+      }
+    }
+  )
+  await Promise.all(trabajadores)
+  return resultados
+}
+
+export interface ResultadoSubtemas {
+  subtemas: string[]
+  /** Bloques en los que se analizó el texto (1 = entró completo en una sola pasada). */
+  bloques: number
+}
+
+/**
+ * Extrae los sub-temas del material. El trabajo se reparte por bloques para que el final
+ * del documento también cuente (antes solo se miraba el head y de ahí salían pocos
+ * sub-temas, todos del principio) y, si quedan menos que el objetivo del preset, se hace
+ * una pasada de cobertura sobre el inicio y el final. Los duplicados se descartan por
+ * similitud y el orden final sigue la aparición en el texto.
+ */
+export async function extraerSubtemas(
+  texto: string,
+  modelo: string = MODELO_PRINCIPAL_POR_DEFECTO,
+  proveedor?: ProveedorNube,
+  preset?: string
+): Promise<ResultadoSubtemas> {
+  const ajustes = ajustesDePreset(preset)
+  const bloques = dividirEnBloques(texto, ajustes.subtemasBloqueChars, ajustes.subtemasMaxBloques)
+  if (bloques.length === 0) return { subtemas: [], bloques: 0 }
+
+  // Cuántos sub-temas "sostiene" el material: pedir 10 para 400 caracteres obliga al modelo
+  // a inventar variantes del mismo concepto, que es la repetición que queremos evitar.
+  const objetivoTotal = Math.max(
+    3,
+    Math.min(ajustes.maxSubtemas, Math.ceil(texto.length / CHARS_POR_SUBTEMA))
+  )
+
+  // Con un solo bloque se pide el objetivo completo; repartido, cada bloque aporta una parte.
+  const porBloque = await mapearConLimite(bloques, SUBTEMAS_CONCURRENCIA, async (bloque, indice) => {
+    const objetivoBloque =
+      bloques.length === 1
+        ? objetivoTotal
+        : Math.max(2, Math.min(ajustes.maxSubtemasPorBloque, Math.ceil(bloque.length / CHARS_POR_SUBTEMA)))
+    try {
+      return await pedirSubtemas({
+        prompt: construirPromptSubtemas(bloque, {
+          indice: indice + 1,
+          total: bloques.length,
+          maxPorBloque: objetivoBloque,
+        }),
+        modelo,
+        proveedor,
+      })
+    } catch (error) {
+      // Un bloque que falla no puede tirar abajo la creación de la sesión.
+      console.error(`[subtemas] falló el bloque ${indice + 1}/${bloques.length}:`, error)
+      return [] as string[]
+    }
+  })
+
+  const candidatos = porBloque.flat()
+  let unicos = deduplicarPorSimilitud(candidatos, (subtema) => subtema)
+
+  if (bloques.length > 1) {
+    for (let intento = 0; intento < ajustes.intentosCobertura; intento++) {
+      if (unicos.length >= objetivoTotal) break
+      const antes = unicos.length
+      try {
+        const nuevos = await pedirSubtemas({
+          prompt: construirPromptSubtemasCobertura({
+            fuente: fuenteParaCobertura(texto),
+            yaDetectados: unicos,
+            cuantos: Math.max(1, objetivoTotal - unicos.length),
+          }),
+          modelo,
+          proveedor,
+        })
+        unicos = deduplicarPorSimilitud([...unicos, ...nuevos], (subtema) => subtema)
+      } catch (error) {
+        console.error("[subtemas] falló la pasada de cobertura:", error)
+        break
+      }
+      // Si la pasada no aportó nada nuevo, no tiene sentido repetirla.
+      if (unicos.length === antes) break
+    }
+  }
+
+  const subtemas = ordenarPorAparicion(unicos, texto, (subtema) => subtema).slice(0, ajustes.maxSubtemas)
+
+  // Diagnóstico honesto: material largo con pocos sub-temas significa que hay que mirarlo.
+  if (bloques.length > 1 && subtemas.length < Math.min(5, ajustes.maxSubtemas)) {
+    console.warn(
+      `[subtemas] el material se partió en ${bloques.length} bloques y solo salieron ${subtemas.length} sub-temas`
     )
   }
+
+  return { subtemas, bloques: bloques.length }
 }
 
 // --- Fase C1: apunte sintético (modalidad "tema libre") ----------------------

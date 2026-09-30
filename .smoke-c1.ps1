@@ -14,12 +14,47 @@ param(
 $errores = @()
 
 function Ok([string]$nombre, [bool]$cond, [string]$detalle = "") {
+  # El detalle se imprime siempre (no solo al fallar): con datos generados por el modelo,
+  # ver qué devolvió cada paso es la mitad del diagnóstico.
+  $sufijo = ""
+  if ($detalle) { $sufijo = "  ($detalle)" }
   if ($cond) {
-    Write-Host "  PASS  $nombre"
+    Write-Host "  PASS  $nombre$sufijo"
   } else {
-    Write-Host "  FAIL  $nombre  $detalle"
+    Write-Host "  FAIL  $nombre$sufijo" -ForegroundColor Red
     $script:errores += $nombre
   }
+}
+
+# --- Similitud (mismo criterio que lib/texto.ts) ------------------------------
+# Se usa para verificar que los sub-temas no se repitan: la app compara por tokens
+# significativos (Jaccard) porque "useState" y "useState básico" son lo mismo.
+$PALABRAS_VACIAS = @('de','del','la','el','los','las','un','una','unos','unas','y','o','en','con','sin','para','por','que','al','a','su','sus','es','son','como','vs','sobre','entre','lo','se','mas','más','muy')
+
+function TokensSignificativos([string]$texto) {
+  $sinAcentos = $texto.Normalize([Text.NormalizationForm]::FormD) -replace '\p{Mn}', ''
+  $limpio = ($sinAcentos.ToLower() -replace '[^a-z0-9\s]', ' ')
+  return @($limpio -split '\s+' | Where-Object { $_.Length -gt 1 -and $PALABRAS_VACIAS -notcontains $_ })
+}
+
+function Similitud([string]$a, [string]$b) {
+  $ta = @(TokensSignificativos $a | Select-Object -Unique)
+  $tb = @(TokensSignificativos $b | Select-Object -Unique)
+  if ($ta.Count -eq 0 -or $tb.Count -eq 0) { return 0 }
+  $comunes = @($ta | Where-Object { $tb -contains $_ }).Count
+  return [double]$comunes / ($ta.Count + $tb.Count - $comunes)
+}
+
+function ParMasParecido([array]$items) {
+  $peor = 0.0
+  $par = ""
+  for ($i = 0; $i -lt $items.Count; $i++) {
+    for ($j = $i + 1; $j -lt $items.Count; $j++) {
+      $s = Similitud ([string]$items[$i]) ([string]$items[$j])
+      if ($s -gt $peor) { $peor = $s; $par = "$($items[$i]) ~ $($items[$j])" }
+    }
+  }
+  return @{ similitud = [Math]::Round($peor, 2); par = $par }
 }
 
 function Llamar([string]$metodo, [string]$ruta, [object]$body) {
@@ -71,12 +106,15 @@ useEffect ejecuta efectos después del renderizado y acepta un array de dependen
 Si el array de dependencias cambia, el efecto vuelve a correr; si está vacío, corre una sola vez.
 "@
 $r = Llamar Post "/api/sesiones/crear" @{ texto = $texto; modo = "apunte"; modeloPrincipal = $Modelo }
-Ok "crear apunte responde 200" ($r.status -eq 200) "status=$($r.status) data=$($r.data | ConvertTo-Json -Compress -Depth 5)"
+Ok "crear apunte responde 200" ($r.status -eq 200) "status=$($r.status) sesionId=$($r.data.sesionId) subtemas=$(@($r.data.subtemas).Count) bloques=$($r.data.analisis.bloques)"
 $sesionA = $r.data.sesionId
 $sesionesBorrar += $sesionA
 Ok "apunte crea sub-temas" ($r.data.subtemas.Count -gt 0)
 Ok "apunte responde modo=apunte" ($r.data.modo -eq "apunte")
 Ok "apunte NO devuelve apunte generado" (-not $r.data.apunte)
+# 374 caracteres no sostienen 10 sub-temas: pedirlos obligaba al modelo a inventar
+# variantes del mismo concepto ("Hooks usan estado" / "Funciones permiten estado").
+Ok "texto corto: no infla sub-temas con sinónimos (<=3)" (@($r.data.subtemas).Count -le 3) "count=$(@($r.data.subtemas).Count)"
 
 Write-Host "`n--- 2. Validaciones ---"
 $r = Llamar Post "/api/sesiones/crear" @{ texto = "  "; modo = "apunte"; modeloPrincipal = $Modelo }
@@ -92,13 +130,16 @@ $r = Llamar Post "/api/sesiones/crear" @{
   objetivo = "entender cuándo usar cada una"
   modeloPrincipal = $Modelo
 }
-Ok "crear tema_libre responde 200" ($r.status -eq 200) "status=$($r.status) data=$($r.data | ConvertTo-Json -Compress -Depth 5)"
+Ok "crear tema_libre responde 200" ($r.status -eq 200) "status=$($r.status) sesionId=$($r.data.sesionId) subtemas=$(@($r.data.subtemas).Count)"
 $sesionT = $r.data.sesionId
 $sesionesBorrar += $sesionT
 $apunte = [string]$r.data.apunte
 Ok "devuelve un apunte no vacío" ($apunte.Length -gt 500) "largo=$($apunte.Length)"
 Ok "devuelve sub-temas" ($r.data.subtemas.Count -gt 0)
 Ok "topic es un título legible" ([string]$r.data.topic -and $r.data.topic.Length -lt 120) "topic=$($r.data.topic)"
+# El apunte del modelo ronda los 3-4k caracteres: pedir los 10 del preset hace que el
+# modelo repita el mismo concepto con sinónimos. Los sub-temas van en proporción al texto.
+Ok "apunte de ~3,4k: sub-temas proporcionales (<=6)" (@($r.data.subtemas).Count -le 6) "count=$(@($r.data.subtemas).Count) chars=$($apunte.Length)"
 
 $r2 = Llamar Get "/api/sesiones/$sesionT" $null
 Ok "GET sesión trae modo=tema_libre" ($r2.data.modo -eq "tema_libre")
@@ -123,7 +164,40 @@ $r2 = Llamar Get "/api/sesiones/$sesionT" $null
 Ok "GET refleja los sub-temas descartados" (@($r2.data.subtemas).Count -eq $mantener.Count) "count=$(@($r2.data.subtemas).Count)"
 Ok "el progreso total baja en consecuencia" ($r2.data.progreso.subtemasTotal -eq $mantener.Count)
 
-Write-Host "`n--- 5. Limpieza ---"
+Write-Host "`n--- 5. Cobertura con texto largo (presets) ---"
+# Antes el modelo solo veía el head del texto (~4k): con material largo salían 4-5
+# sub-temas, todos del principio y del mismo tema. Ahora el texto se parte en bloques y la
+# última parte del documento cuenta igual, así que este material tiene que rendir bastantes
+# sub-temas distintos.
+$textoLargo = (Get-Content -Raw -Encoding UTF8 (Join-Path $PSScriptRoot ".smoke-texto-largo.txt")).Trim()
+Ok "el material de prueba es largo de verdad" ($textoLargo.Length -gt 9000) "chars=$($textoLargo.Length)"
+
+$r = Llamar Post "/api/sesiones/crear" @{ texto = $textoLargo; modo = "apunte"; modeloPrincipal = $Modelo; preset = "equilibrado" }
+if ($r.data.sesionId) { $sesionesBorrar += $r.data.sesionId }
+$nombresLargo = @($r.data.subtemas | ForEach-Object { $_.nombre })
+$bloquesEquilibrado = [int]$r.data.analisis.bloques
+Ok "crear con texto largo responde 200" ($r.status -eq 200 -and $r.data.sesionId -gt 0) "status=$($r.status) sesionId=$($r.data.sesionId)"
+Ok "analiza el material en varios bloques" ($bloquesEquilibrado -ge 2) "bloques=$bloquesEquilibrado"
+Ok "encuentra 8+ sub-temas (antes salían 4-5)" ($nombresLargo.Count -ge 8) "count=$($nombresLargo.Count)"
+Ok "respeta el tope del preset equilibrado (10)" ($nombresLargo.Count -le 10) "count=$($nombresLargo.Count)"
+$peor = ParMasParecido $nombresLargo
+Ok "ningún par de sub-temas parecidos (similitud < 0.7)" ($peor.similitud -lt 0.7) "peor=$($peor.similitud) par=$($peor.par)"
+Write-Host "        sub-temas: $($nombresLargo -join ' | ')"
+
+$r2 = Llamar Get "/api/sesiones/$($r.data.sesionId)" $null
+Ok "los sub-temas quedan guardados en la sesión" (@($r2.data.subtemas).Count -eq $nombresLargo.Count) "guardados=$(@($r2.data.subtemas).Count)"
+
+$r = Llamar Post "/api/sesiones/crear" @{ texto = $textoLargo; modo = "apunte"; modeloPrincipal = $Modelo; preset = "rapido" }
+if ($r.data.sesionId) { $sesionesBorrar += $r.data.sesionId }
+Ok "preset rapido: analiza menos bloques" ([int]$r.data.analisis.bloques -lt $bloquesEquilibrado) "bloques=$($r.data.analisis.bloques) vs=$bloquesEquilibrado"
+Ok "preset rapido: tope de 6 sub-temas" (@($r.data.subtemas).Count -le 6) "count=$(@($r.data.subtemas).Count)"
+Ok "el preset vuelve normalizado" ($r.data.preset -eq "rapido") "preset=$($r.data.preset)"
+
+$r = Llamar Post "/api/sesiones/crear" @{ texto = $texto; modo = "apunte"; modeloPrincipal = $Modelo; preset = "no-existe" }
+if ($r.data.sesionId) { $sesionesBorrar += $r.data.sesionId }
+Ok "preset desconocido cae en el default" ($r.data.preset -eq "equilibrado") "preset=$($r.data.preset)"
+
+Write-Host "`n--- 6. Limpieza ---"
 foreach ($id in $sesionesBorrar) {
   if ($id) { Llamar Post "/api/sesiones/eliminar" @{ sesionId = $id } | Out-Null }
 }

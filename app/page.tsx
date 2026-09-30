@@ -9,7 +9,7 @@ import {
   proveedorDeModelo,
   type ProveedorNube,
 } from "@/lib/proveedores";
-import { MODELO_GEMINI, MODELO_PRINCIPAL_POR_DEFECTO, MODELO_PREGUNTAS_POR_DEFECTO } from "@/lib/config";
+import { MODELO_GEMINI, MODELO_PRINCIPAL_POR_DEFECTO, MODELO_PREGUNTAS_POR_DEFECTO, PRESET_POR_DEFECTO, normalizarPreset, type PresetCalidad } from "@/lib/config";
 import type { ModoSesion, NivelSesion } from "@/lib/tipos";
 import {
   IconoAdjuntar,
@@ -84,6 +84,13 @@ export default function HomePage() {
   const [apunteGenerado, setApunteGenerado] = useState<string | null>(null);
   const [mostrarApunte, setMostrarApunte] = useState(false);
   const [preparandoSondeo, setPreparandoSondeo] = useState(false);
+  // Cobertura del último análisis: sirve para avisar cuando el material era largo y
+  // salieron pocos sub-temas (antes el modelo solo miraba el principio del texto).
+  const [analisis, setAnalisis] = useState<{
+    bloques: number;
+    subtemas: number;
+    textoChars: number;
+  } | null>(null);
 
   const [ajustesModalAbierto, setAjustesModalAbierto] = useState(false);
   const [modelosDisponibles, setModelosDisponibles] = useState<ModeloOllama[]>([]);
@@ -93,6 +100,8 @@ export default function HomePage() {
   // Fase B.11 — pre-generación del próximo lote en background (solo Ollama local).
   // Se guarda en localStorage y viaja como ?pregen=0 en los requests del sondeo.
   const [pregen, setPregen] = useState(true);
+  // Calidad vs tiempo: se elige en Ajustes y viaja en el body de creación y en el sondeo.
+  const [preset, setPreset] = useState<PresetCalidad>(PRESET_POR_DEFECTO);
   const [proveedores, setProveedores] = useState<ProveedorNube[]>([]);
   const [mostrandoFormProveedor, setMostrandoFormProveedor] = useState(false);
   const [nuevoNombre, setNuevoNombre] = useState("");
@@ -111,6 +120,7 @@ export default function HomePage() {
     const guardadoPrincipal = localStorage.getItem("uselearn:modeloPrincipal");
     const guardadoPreguntas = localStorage.getItem("uselearn:modeloPreguntas");
     const pregenGuardado = localStorage.getItem("uselearn:pregen") !== "0";
+    const presetGuardado = normalizarPreset(localStorage.getItem("uselearn:preset") ?? undefined);
     // Se cargan acá y no recién al abrir Ajustes: si no, al crear una sesión con un
     // proveedor de nube elegido el componente no lo tenía en estado y no se mandaba.
     const proveedoresGuardados = obtenerProveedores();
@@ -120,6 +130,7 @@ export default function HomePage() {
       if (guardadoPrincipal) setModeloPrincipal(guardadoPrincipal);
       if (guardadoPreguntas) setModeloPreguntas(guardadoPreguntas);
       setPregen(pregenGuardado);
+      setPreset(presetGuardado);
       setProveedores(proveedoresGuardados);
     });
   }, []);
@@ -194,6 +205,7 @@ export default function HomePage() {
       setSubtemasGenerados([]);
       setSubtemasElegidos([]);
       setApunteGenerado(null);
+      setAnalisis(null);
       setMostrarApunte(false);
     }
   }
@@ -221,6 +233,9 @@ export default function HomePage() {
             ? { modo, tema: temaLibre, nivel, objetivo }
             : { modo, texto }),
           modeloPrincipal,
+          // Calidad vs tiempo: el servidor decide con esto cuántos bloques analiza, cuántos
+          // sub-temas busca y cuánto contexto le manda al modelo.
+          preset,
           // La config del proveedor viaja en el body: el servidor no puede leer
           // localStorage, así que ahí no hay forma de conseguirlo.
           proveedor: proveedorDeModelo(proveedores, modeloPrincipal) ?? undefined,
@@ -237,6 +252,17 @@ export default function HomePage() {
       setSubtemasGenerados(detectados);
       setSubtemasElegidos(detectados.map((s) => s.id));
       setApunteGenerado(typeof data.apunte === "string" ? data.apunte : null);
+      // El server informa en cuántos bloques analizó el material: si era largo y salieron
+      // pocos sub-temas, se avisa en pantalla en vez de dejar que el plan salga pobre.
+      setAnalisis(
+        data.analisis && typeof data.analisis.bloques === "number"
+          ? {
+              bloques: data.analisis.bloques,
+              subtemas: Number(data.analisis.subtemas) || detectados.length,
+              textoChars: Number(data.analisis.textoChars) || 0,
+            }
+          : null
+      );
       setEstadoQuiz("listo");
     } catch {
       setError("No se pudo conectar con el servidor.");
@@ -484,6 +510,19 @@ export default function HomePage() {
                     {subtemasElegidos.length}/{subtemasGenerados.length}
                   </span>
                 </p>
+                {analisis && analisis.bloques > 1 && (
+                  <p
+                    className={`mb-2 rounded-lg border px-2.5 py-2 text-xs leading-relaxed ${
+                      analisis.subtemas < 5
+                        ? "border-amber-500/25 bg-amber-500/[0.06] text-amber-300"
+                        : "border-neutral-800 bg-neutral-950/60 text-neutral-400"
+                    }`}
+                  >
+                    {analisis.subtemas < 5
+                      ? `El material se analizó en ${analisis.bloques} bloques y salieron solo ${analisis.subtemas} sub-temas: probá el nivel "Profundo" en Ajustes o pegá un texto más puntual.`
+                      : `Material analizado en ${analisis.bloques} bloques (${analisis.textoChars.toLocaleString("es-AR")} caracteres).`}
+                  </p>
+                )}
                 <ul className="flex max-h-44 flex-col gap-1 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-neutral-700">
                   {subtemasGenerados.map((s) => {
                     const activo = subtemasElegidos.includes(s.id);

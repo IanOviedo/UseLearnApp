@@ -64,3 +64,149 @@ export function headPorParrafo(texto: string, maxChars: number = SUBTEMAS_HEAD_C
   const corte = limpio.lastIndexOf("\n", maxChars);
   return (corte > maxChars * 0.5 ? limpio.slice(0, corte) : limpio.slice(0, maxChars)).trim();
 }
+
+// --- Calidad del sondeo (bloques + similitud) ----------------------------------
+// Dos problemas reales que resuelven estos helpers: (1) con textos grandes el modelo
+// solo veía el principio, así que salían pocos sub-temas y todos del mismo lado;
+// (2) la anti-repetición comparaba textos por igualdad exacta, así que la misma
+// pregunta reformulada entraba igual.
+
+/** Palabras que no aportan significado al comparar dos sub-temas o enunciados. */
+const PALABRAS_VACIAS = new Set([
+  "de", "del", "la", "el", "los", "las", "un", "una", "unos", "unas", "y", "o", "en",
+  "con", "sin", "para", "por", "que", "al", "a", "su", "sus", "es", "son", "como",
+  "cómo", "vs", "sobre", "entre", "lo", "se", "mas", "más", "muy", "dos", "tres",
+]);
+
+/** Baja a minúsculas, saca acentos y puntuación: base para comparar dos textos. */
+export function normalizarParaSimilitud(texto: string): string {
+  return texto
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Tokens con significado de un texto (sin palabras vacías ni tokens de una letra). */
+export function tokensSignificativos(texto: string): string[] {
+  return normalizarParaSimilitud(texto)
+    .split(" ")
+    .filter((token) => token.length > 1 && !PALABRAS_VACIAS.has(token));
+}
+
+/** Similitud de Jaccard sobre tokens: 0 = nada en común, 1 = los mismos tokens. */
+export function similitudTokens(a: string, b: string): number {
+  const tokensA = new Set(tokensSignificativos(a));
+  const tokensB = new Set(tokensSignificativos(b));
+  if (tokensA.size === 0 || tokensB.size === 0) return 0;
+  let comunes = 0;
+  for (const token of tokensA) if (tokensB.has(token)) comunes++;
+  return comunes / (tokensA.size + tokensB.size - comunes);
+}
+
+/**
+ * ¿Dos textos hablan de lo mismo? Además del umbral de Jaccard se consideran parecidos
+ * los casos de inclusión ("useState" vs "useState básico"), que Jaccard penaliza por
+ * tener pocos tokens.
+ */
+export function esParecido(a: string, b: string, umbral: number = 0.6): boolean {
+  const normalizadoA = normalizarParaSimilitud(a);
+  const normalizadoB = normalizarParaSimilitud(b);
+  if (!normalizadoA || !normalizadoB) return false;
+  if (normalizadoA === normalizadoB) return true;
+  if (normalizadoA.includes(normalizadoB) || normalizadoB.includes(normalizadoA)) return true;
+  return similitudTokens(normalizadoA, normalizadoB) >= umbral;
+}
+
+/** Se queda con la primera aparición y descarta las que se parecen a algo ya visto. */
+export function deduplicarPorSimilitud<T>(
+  items: T[],
+  comoTexto: (item: T) => string = (item) => String(item),
+  umbral: number = 0.6
+): T[] {
+  const vistos: string[] = [];
+  const unicos: T[] = [];
+  for (const item of items) {
+    const texto = comoTexto(item).trim();
+    if (!texto) continue;
+    if (vistos.some((previo) => esParecido(previo, texto, umbral))) continue;
+    vistos.push(texto);
+    unicos.push(item);
+  }
+  return unicos;
+}
+
+/** Posición de la primera aparición del texto (o de alguno de sus términos) en el documento. */
+export function posicionEnTexto(documento: string, aguja: string): number {
+  const normalizado = normalizarParaSimilitud(documento);
+  if (!normalizado) return Number.MAX_SAFE_INTEGER;
+  const literal = normalizado.indexOf(normalizarParaSimilitud(aguja));
+  if (literal !== -1) return literal;
+  let mejor = -1;
+  for (const token of tokensSignificativos(aguja)) {
+    const posicion = normalizado.indexOf(token);
+    if (posicion !== -1 && (mejor === -1 || posicion < mejor)) mejor = posicion;
+  }
+  return mejor === -1 ? Number.MAX_SAFE_INTEGER : mejor;
+}
+
+/** Ordena por primera aparición en el documento; en empates conserva el orden original. */
+export function ordenarPorAparicion<T>(items: T[], documento: string, comoTexto: (item: T) => string): T[] {
+  return items
+    .map((item, indice) => ({ item, indice, posicion: posicionEnTexto(documento, comoTexto(item)) }))
+    .sort((a, b) => (a.posicion === b.posicion ? a.indice - b.indice : a.posicion - b.posicion))
+    .map((entrada) => entrada.item);
+}
+
+/**
+ * Parte el texto en bloques para extraer sub-temas sin perder el final del documento.
+ * Corta por párrafo (nunca en medio de una oración) y arrastra un solape para que un
+ * concepto que cruza el límite no quede afuera. Si con el tamaño pedido salen más
+ * bloques que `maxBloques`, se agrandan para cubrir TODO el texto en `maxBloques` bloques.
+ */
+export function dividirEnBloques(
+  texto: string,
+  maxChars: number,
+  maxBloques: number,
+  solapeChars: number = 300
+): string[] {
+  const limpio = texto.replace(/\r/g, "").trim();
+  if (!limpio) return [];
+
+  const tamano = Math.max(maxChars, Math.ceil(limpio.length / Math.max(1, maxBloques)));
+  const parrafos = limpio
+    .split(/\n+/)
+    .map((parrafo) => parrafo.trim())
+    .filter((parrafo) => parrafo.length > 0);
+
+  const bloques: string[] = [];
+  let actual = "";
+
+  const cerrar = () => {
+    if (actual.trim()) bloques.push(actual.trim());
+    actual = "";
+  };
+
+  for (const parrafo of parrafos) {
+    if (parrafo.length > tamano) {
+      // Párrafo gigante (PDF sin saltos): se corta duro para que no se pierda nada.
+      cerrar();
+      for (let i = 0; i < parrafo.length; i += tamano) {
+        bloques.push(parrafo.slice(i, i + tamano).trim());
+      }
+      continue;
+    }
+    if (actual.length + parrafo.length + 1 > tamano) cerrar();
+    if (actual === "" && bloques.length > 0 && solapeChars > 0) {
+      const anterior = bloques[bloques.length - 1];
+      actual = anterior.slice(Math.max(0, anterior.length - solapeChars)).trim();
+    }
+    actual = actual ? `${actual}\n${parrafo}` : parrafo;
+  }
+  cerrar();
+
+  return bloques;
+}
+

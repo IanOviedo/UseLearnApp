@@ -18,7 +18,7 @@ import {
   esSubtemaDebil,
 } from "./db";
 import { generarFeedbackSondeo, generarLotePreguntas, type ResultadoSubtema } from "./ollama";
-import { MAX_PREGUNTAS_SESION, PREGEN_UMBRAL_PENDIENTES } from "./config";
+import { maxPreguntasSesion, PREGEN_UMBRAL_PENDIENTES } from "./config";
 import type { ProveedorNube } from "./proveedores";
 import type { LoteItem, Pregunta, SubtemaEstado } from "./tipos";
 
@@ -68,7 +68,9 @@ export async function servirSiguiente(args: {
   const { sesion, subtemas, progreso } = obtenerEstadoSondeo(args.sesionId);
   if (!sesion) throw new Error("Sesión no encontrada");
 
-  if (sondeoCompleto(subtemas) || progreso.respondidas >= MAX_PREGUNTAS_SESION) {
+  // El tope de seguridad se deriva de la cantidad de sub-temas: con 20 fijo, una sesión de
+  // 10 sub-temas cerraba antes de evaluarlos a todos.
+  if (sondeoCompleto(subtemas) || progreso.respondidas >= maxPreguntasSesion(subtemas.length)) {
     const subtemasDebiles = obtenerSubtemasDebiles(args.sesionId);
     const subtemasSinDominar = obtenerSubtemasSinDominar(args.sesionId);
     if (sesion.feedbackFinal !== null) {
