@@ -36,6 +36,14 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# logs locales del dev server de pruebas (puerto 3111)
+dev-*.log
+dev-*.err
+dev-*.pid
+
+# scripts de debug de una sola vez (scanners, probes)
+/.tmp-*
+
 # vercel
 .vercel
 

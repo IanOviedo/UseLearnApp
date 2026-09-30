@@ -3,6 +3,8 @@ import { lanzarPregenSiConviene, servirSiguiente } from "@/lib/sondeo";
 import {
   MODELO_PREGUNTAS_POR_DEFECTO,
   MODELO_PRINCIPAL_POR_DEFECTO,
+  ajustesDePreset,
+  normalizarPreset,
 } from "@/lib/config";
 import { proveedorDesdeParams } from "@/lib/proveedores";
 
@@ -29,6 +31,13 @@ export async function GET(request: NextRequest) {
   const modeloPrincipal = sp.get("modeloPrincipal") || MODELO_PRINCIPAL_POR_DEFECTO;
   const proveedorPreguntas = leerProveedor(sp, "proveedorPreguntas");
   const proveedorPrincipal = leerProveedor(sp, "proveedorPrincipal");
+  // El preset viaja en cada request (el servidor no lee localStorage) y de él salen
+  // cuántas preguntas trae el lote, si hay paso de ángulos y cuántos reintentos.
+  // El `pregen` explícito del cliente pisa al del preset cuando viene.
+  const preset = normalizarPreset(sp.get("preset") ?? undefined);
+  const ajustes = ajustesDePreset(preset);
+  const pregenParam = sp.get("pregen");
+  const pregen = pregenParam === null ? ajustes.pregen : pregenParam !== "0";
 
   if (!sesionId) {
     return NextResponse.json(
@@ -46,6 +55,7 @@ export async function GET(request: NextRequest) {
       modeloPrincipal,
       proveedorPreguntas,
       proveedorPrincipal,
+      preset,
     });
 
     // Fase B.11 — pre-generación en paralelo: si se sirvió de pendientes y quedan
@@ -58,7 +68,8 @@ export async function GET(request: NextRequest) {
         pendientesRestantes: payload.lote.length - 1,
         modeloPreguntas,
         proveedorPreguntas,
-        pregen: sp.get("pregen") !== "0",
+        pregen,
+        preset,
       });
     }
 

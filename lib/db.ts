@@ -487,9 +487,27 @@ function obtenerPreguntasSinResponder(subtemaId: number): { id: number; contenid
 
 /** Enunciados ya generados para un sub-tema: se le pasan al modelo para que no los repita. */
 function obtenerPreguntasDelSubtema(subtemaId: number): string[] {
-  const filas = db
-    .prepare("SELECT contenido FROM preguntas WHERE subtema_id = ? AND descartada = 0 ORDER BY id")
-    .all(subtemaId) as { contenido: string }[];
+  return enunciadosDe(
+    "SELECT contenido FROM preguntas WHERE subtema_id = ? AND descartada = 0 ORDER BY id",
+    subtemaId
+  );
+}
+
+/**
+ * Enunciados de TODA la sesión (incluye descartadas: también cuentan como vistas).
+ * La anti-repetición era solo por sub-tema, así que al cambiar de sub-tema el modelo
+ * repetía preguntas ya vistas sin que nadie se lo impidiera.
+ */
+function obtenerEnunciadosSesion(sesionId: number): string[] {
+  return enunciadosDe(
+    "SELECT contenido FROM preguntas WHERE sesion_id = ? ORDER BY id",
+    sesionId
+  );
+}
+
+/** Extrae el campo `pregunta` del JSON guardado (tolera contenido ilegible). */
+function enunciadosDe(query: string, arg: number): string[] {
+  const filas = db.prepare(query).all(arg) as { contenido: string }[];
 
   return filas
     .map((fila) => {
@@ -974,6 +992,7 @@ export {
   guardarLotePreguntas,
   obtenerPreguntasSinResponder,
   obtenerPreguntasDelSubtema,
+  obtenerEnunciadosSesion,
   registrarRespuesta,
   obtenerErroresSesion,
   obtenerHistorialSesion,

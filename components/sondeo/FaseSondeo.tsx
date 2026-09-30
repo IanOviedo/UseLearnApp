@@ -6,6 +6,7 @@ import {
   IconoAlerta,
   IconoCargador,
   IconoCheck,
+  IconoDestello,
   IconoEquis,
   IconoFlecha,
 } from "@/components/ui/Iconos";
@@ -301,6 +302,9 @@ export default function FaseSondeo({
         });
         if (config.modeloPreguntas) queryParams.set("modeloPreguntas", config.modeloPreguntas);
         if (config.modeloPrincipal) queryParams.set("modeloPrincipal", config.modeloPrincipal);
+        // El preset manda cuántas preguntas trae el lote, si hay paso de ángulos y los
+        // reintentos: el servidor no puede leer localStorage, así que viaja en cada request.
+        queryParams.set("preset", config.preset);
         // Se mandan los dos: el del modelo de preguntas y el del modelo principal
         // (el feedback final también puede salir de un proveedor de nube).
         agregarProveedorAParams(queryParams, "proveedorPreguntas", config.proveedorPreguntas);
@@ -412,6 +416,7 @@ export default function FaseSondeo({
             proveedorPreguntas: config.proveedorPreguntas,
             proveedorPrincipal: config.proveedorPrincipal,
             pregen: config.pregen,
+            preset: config.preset,
           }),
         });
         const data: ResponderResponse = await res.json();
@@ -604,6 +609,15 @@ export default function FaseSondeo({
                 );
               })}
             </div>
+
+            {activaRespondida && activa.pregunta.explicacion && (
+              <div className="mt-5 flex items-start gap-2.5 rounded-xl border border-amber-500/20 bg-amber-500/[0.05] px-4 py-3.5">
+                <IconoDestello className="mt-0.5 h-4 w-4 shrink-0 text-amber-400/80" />
+                <p className="text-[13px] leading-relaxed text-neutral-300">
+                  {activa.pregunta.explicacion}
+                </p>
+              </div>
+            )}
 
             {activaRespondida ? (
               <button

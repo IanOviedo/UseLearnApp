@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { registrarRespuesta } from "@/lib/db";
 import { lanzarPregenSiConviene, servirSiguiente } from "@/lib/sondeo";
-import { MODELO_PREGUNTAS_POR_DEFECTO, MODELO_PRINCIPAL_POR_DEFECTO } from "@/lib/config";
+import {
+  MODELO_PREGUNTAS_POR_DEFECTO,
+  MODELO_PRINCIPAL_POR_DEFECTO,
+  ajustesDePreset,
+  normalizarPreset,
+} from "@/lib/config";
 import { proveedorDesdeParams } from "@/lib/proveedores";
 import type { ProveedorPayload } from "@/lib/tipos";
 
@@ -54,6 +59,10 @@ export async function POST(request: NextRequest) {
     // se devuelve la próxima pregunta en la MISMA respuesta (1 roundtrip en vez de
     // POST + GET). Sin el flag, el contrato viejo se mantiene intacto.
     if (body.siguiente === true && typeof body.sesionId === "number") {
+      // Mismo preset que el camino GET: el cliente lo manda en cada request.
+      const preset = normalizarPreset(typeof body.preset === "string" ? body.preset : undefined);
+      const pregen =
+        typeof body.pregen === "boolean" ? body.pregen : ajustesDePreset(preset).pregen;
       try {
         const siguiente = await servirSiguiente({
           sesionId: body.sesionId,
@@ -61,6 +70,7 @@ export async function POST(request: NextRequest) {
           modeloPrincipal: typeof body.modeloPrincipal === "string" ? body.modeloPrincipal : MODELO_PRINCIPAL_POR_DEFECTO,
           proveedorPreguntas: leerProveedor(body, "proveedorPreguntas"),
           proveedorPrincipal: leerProveedor(body, "proveedorPrincipal"),
+          preset,
         });
 
         // Fase B.11 — misma pre-generación del route GET: con el merge, el cacheo
@@ -70,7 +80,7 @@ export async function POST(request: NextRequest) {
           !siguiente.completo &&
           siguiente.subtemaId != null &&
           siguiente.lote &&
-          body.pregen !== false
+          pregen
         ) {
           lanzarPregenSiConviene({
             sesionId: body.sesionId,
@@ -78,7 +88,8 @@ export async function POST(request: NextRequest) {
             pendientesRestantes: siguiente.lote.length - 1,
             modeloPreguntas: typeof body.modeloPreguntas === "string" ? body.modeloPreguntas : MODELO_PREGUNTAS_POR_DEFECTO,
             proveedorPreguntas: leerProveedor(body, "proveedorPreguntas"),
-            pregen: true,
+            pregen,
+            preset,
           });
         }
 

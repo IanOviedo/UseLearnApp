@@ -7,9 +7,9 @@ import {
   elegirSiguienteSubtema,
   finalizarSondeo,
   guardarLotePreguntas,
+  obtenerEnunciadosSesion,
   obtenerErroresSesion,
   obtenerEstadoSondeo,
-  obtenerPreguntasDelSubtema,
   obtenerPreguntasSinResponder,
   obtenerSubtemas,
   obtenerSubtemasDebiles,
@@ -18,7 +18,8 @@ import {
   esSubtemaDebil,
 } from "./db";
 import { generarFeedbackSondeo, generarLotePreguntas, type ResultadoSubtema } from "./ollama";
-import { maxPreguntasSesion, PREGEN_UMBRAL_PENDIENTES } from "./config";
+import { juzgarLote } from "./evaluador";
+import { maxPreguntasSesion, PREGEN_UMBRAL_PENDIENTES, type PresetCalidad } from "./config";
 import type { ProveedorNube } from "./proveedores";
 import type { LoteItem, Pregunta, SubtemaEstado } from "./tipos";
 
@@ -64,6 +65,7 @@ export async function servirSiguiente(args: {
   proveedorPreguntas?: ProveedorNube;
   proveedorPrincipal?: ProveedorNube;
   generarSiFalta?: boolean;
+  preset?: PresetCalidad;
 }): Promise<SiguientePayload> {
   const { sesion, subtemas, progreso } = obtenerEstadoSondeo(args.sesionId);
   if (!sesion) throw new Error("Sesión no encontrada");
@@ -116,13 +118,14 @@ export async function servirSiguiente(args: {
     return { completo: false, ...progreso };
   }
 
-  const previas = obtenerPreguntasDelSubtema(subtema.id);
+  const previas = obtenerEnunciadosSesion(args.sesionId);
   const lote = await generarLotePreguntas(
     subtema.nombre,
     sesion.textoOriginal,
     args.modeloPreguntas,
     args.proveedorPreguntas,
-    previas
+    previas,
+    args.preset ? { preset: args.preset, juez: juzgarLote } : { juez: juzgarLote }
   );
   const idsGuardados = guardarLotePreguntas(
     args.sesionId,
@@ -156,6 +159,7 @@ export function lanzarPregenSiConviene(args: {
   modeloPreguntas: string;
   proveedorPreguntas?: ProveedorNube;
   pregen: boolean;
+  preset?: PresetCalidad;
 }): void {
   if (!args.pregen) return;
   if (args.proveedorPreguntas) return;
@@ -172,13 +176,19 @@ export function lanzarPregenSiConviene(args: {
     const siguiente = elegirSiguienteSubtema(candidatos);
     if (!siguiente) return;
     if (obtenerPreguntasSinResponder(siguiente.id).length > 0) return;
-    const previas = obtenerPreguntasDelSubtema(siguiente.id);
+    const previas = obtenerEnunciadosSesion(args.sesionId);
+    // Sin juez en la pre-gen: corre en background contra el MISMO Ollama local que
+    // está por servir la pregunta que el usuario está esperando ahora. N llamadas
+    // extra del juez en paralelo compiten por la GPU y el foreground se
+    // atrasa, que es justo lo que la pre-gen existe para evitar. La pregunta que sí
+    // pasa por el juez es la de `servirSiguiente`, en foreground.
     const lote = await generarLotePreguntas(
       siguiente.nombre,
       sesion.textoOriginal,
       args.modeloPreguntas,
       args.proveedorPreguntas,
-      previas
+      previas,
+      args.preset ? { preset: args.preset } : undefined
     );
     // Re-chequeo POST-generación (síncrono, sin await en el medio: Node es single-thread,
     // así que ningún otro request puede intercalarse entre el chequeo y el guardado):

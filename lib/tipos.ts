@@ -90,6 +90,12 @@ export interface Pregunta {
   pregunta: string;
   opciones: string[];
   indiceCorrecta: number;
+  /**
+   * Por qué la correcta lo es (1-2 frases, anclada al texto). El modelo la genera con
+   * cada pregunta: es lo que hace que el sondeo enseñe en vez de solo evaluar.
+   * Opcional porque las sesiones viejas guardaron el lote sin este campo.
+   */
+  explicacion?: string;
 }
 
 export interface SubtemaEstado {

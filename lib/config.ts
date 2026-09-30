@@ -48,6 +48,12 @@ export interface AjustesCalidad {
   numCtx: number;
   /** Pre-generar el próximo lote: en "profundo" se apaga para no competir por la GPU. */
   pregen: boolean;
+  /**
+   * Pasar cada pregunta por el "juez" LLM (veracidad/claridad contra el texto).
+   * Cuesta una llamada extra por pregunta, así que "rapido" lo apaga: ahí el usuario
+   * pidió espera mínima y solo corre la validación local (forma + duplicados).
+   */
+  juezSemantico: boolean;
 }
 
 export const PRESETS_CALIDAD: Record<PresetCalidad, AjustesCalidad> = {
@@ -66,6 +72,7 @@ export const PRESETS_CALIDAD: Record<PresetCalidad, AjustesCalidad> = {
     excerptMaxChars: 1800,
     numCtx: 8192,
     pregen: true,
+    juezSemantico: false,
   },
   /** Nuevo default: cubre todo el texto, verifica y regenera una vez. */
   equilibrado: {
@@ -82,6 +89,7 @@ export const PRESETS_CALIDAD: Record<PresetCalidad, AjustesCalidad> = {
     excerptMaxChars: 2500,
     numCtx: 8192,
     pregen: true,
+    juezSemantico: true,
   },
   /** Para material grande y ganas de esperar: más sub-temas, más contexto, sin pregen. */
   profundo: {
@@ -98,6 +106,7 @@ export const PRESETS_CALIDAD: Record<PresetCalidad, AjustesCalidad> = {
     excerptMaxChars: 3000,
     numCtx: 16384,
     pregen: false,
+    juezSemantico: true,
   },
 };
 
@@ -169,6 +178,12 @@ export const TEMPERATURA_JSON = 0.2;
 export const NUM_PREDICT_SUBTEMAS = BASE.numPredictSubtemas;
 export const NUM_PREDICT_LOTE = BASE.numPredictLote;
 export const NUM_PREDICT_FEEDBACK = 300;
+
+/**
+ * Tokens para el veredicto del juez. Es un sí/no con motivo corto: si se le da más
+ * presupuesto, el modelo se pone a justificar la pregunta en lugar de decidir.
+ */
+export const NUM_PREDICT_JUEZ = 120;
 
 /** Tamaño del excerpt por subtema (default del preset): más contexto = menos genérico. */
 export const EXCERPT_MAX_CHARS = BASE.excerptMaxChars;

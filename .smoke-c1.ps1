@@ -197,7 +197,66 @@ $r = Llamar Post "/api/sesiones/crear" @{ texto = $texto; modo = "apunte"; model
 if ($r.data.sesionId) { $sesionesBorrar += $r.data.sesionId }
 Ok "preset desconocido cae en el default" ($r.data.preset -eq "equilibrado") "preset=$($r.data.preset)"
 
-Write-Host "`n--- 6. Limpieza ---"
+Write-Host "`n--- 6. Calidad del sondeo (Tanda 2) ---"
+# Antes la anti-repetición era por sub-tema: al cambiar de sub-tema la misma pregunta
+# volvía a salir, y las preguntas no traían explicación (el sondeo evaluaba, no enseñaba).
+# Este bloque recorre el sondeo respondiendo siempre la correcta y junta todos los
+# enunciados servidos para verificar que ninguno se repite en TODA la sesión.
+$r = Llamar Post "/api/sesiones/crear" @{ texto = $texto; modo = "apunte"; modeloPrincipal = $Modelo; preset = "equilibrado" }
+$sesionS = $r.data.sesionId
+if ($sesionS) { $sesionesBorrar += $sesionS }
+Ok "crear sesión para el sondeo" ($r.status -eq 200 -and $sesionS -gt 0) "status=$($r.status) sesionId=$sesionS"
+
+$rutaSiguiente = "/api/sondeo/siguiente-pregunta?sesionId=$sesionS&modeloPreguntas=$Modelo&modeloPrincipal=$Modelo&preset=equilibrado&pregen=0"
+$vistasQ = @()
+$sinExplicacion = 0
+$posiciones = @()
+$preguntaActual = $null
+
+if ($sesionS) {
+  for ($i = 0; $i -lt 12; $i++) {
+    if ($null -eq $preguntaActual) {
+      $rq = Llamar Get $rutaSiguiente $null
+      if (-not $rq.data -or $rq.data.completo -or -not $rq.data.pregunta) { break }
+      $preguntaActual = $rq.data
+    }
+    $vistasQ += [string]$preguntaActual.pregunta.pregunta
+    if ([string]::IsNullOrWhiteSpace([string]$preguntaActual.pregunta.explicacion)) { $sinExplicacion++ }
+    $posiciones += [int]$preguntaActual.pregunta.indiceCorrecta
+
+    # Se responde siempre la correcta (el objetivo acá es recorrer el sondeo, no evaluarlo).
+    $correcta = [string]$preguntaActual.pregunta.opciones[[int]$preguntaActual.pregunta.indiceCorrecta]
+    $rr = Llamar Post "/api/sondeo/responder" @{
+      preguntaId = $preguntaActual.preguntaId
+      opcionElegida = $correcta
+      sesionId = $sesionS
+      siguiente = $true
+      preset = "equilibrado"
+      pregen = $false
+      modeloPreguntas = $Modelo
+      modeloPrincipal = $Modelo
+    }
+    if ($rr.data -and $rr.data.siguiente -and -not $rr.data.siguiente.completo) {
+      $preguntaActual = $rr.data.siguiente
+    } else {
+      $preguntaActual = $null
+    }
+  }
+}
+
+Ok "el sondeo sirvió varias preguntas" ($vistasQ.Count -ge 4) "count=$($vistasQ.Count)"
+Ok "ninguna pregunta repetida en toda la sesión" ((ParMasParecido $vistasQ).similitud -lt 0.6) "peor=$((ParMasParecido $vistasQ).par)"
+Ok "todas las preguntas traen explicación" ($vistasQ.Count -gt 0 -and $sinExplicacion -eq 0) "sinExplicacion=$sinExplicacion de $($vistasQ.Count)"
+Write-Host "        preguntas: $($vistasQ -join ' | ')"
+
+# Distribución de la correcta: si cae siempre en el mismo índice el usuario aprende la
+# posición en vez del tema. `distribuirLote` (lib/ollama.ts) lo evita al recortar el lote.
+$posicionesDistintas = @($posiciones | Select-Object -Unique)
+$masRepetida = 0
+if ($posiciones.Count -gt 0) { $masRepetida = ($posiciones | Group-Object | Sort-Object Count -Descending | Select-Object -First 1).Count }
+Ok "la correcta no cae siempre en la misma posición" ($posiciones.Count -ge 3 -and $posicionesDistintas.Count -ge 2 -and $masRepetida -le ($posiciones.Count / 2 + 1)) "posiciones=$($posiciones -join ',')"
+
+Write-Host "`n--- 7. Limpieza ---"
 foreach ($id in $sesionesBorrar) {
   if ($id) { Llamar Post "/api/sesiones/eliminar" @{ sesionId = $id } | Out-Null }
 }

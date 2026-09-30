@@ -1,3 +1,6 @@
+import type { Pregunta } from "./tipos";
+import { validarLote, distribucionSospechosa } from "./validacion";
+
 import {
   ajustesDePreset,
   CHARS_POR_SUBTEMA,
@@ -18,10 +21,10 @@ import {
   URL_GEMINI,
 } from "./config"
 import type { ProveedorNube } from "./proveedores"
-import type { Pregunta } from "./tipos"
 import {
   deduplicarPorSimilitud,
   dividirEnBloques,
+  esParecido,
   extraerExcerpt,
   ordenarPorAparicion,
   tokensSignificativos,
@@ -34,6 +37,9 @@ import {
 // así que agregar una feature nueva obligaba a reescribir la capa de transporte tres
 // veces. Además `generarFeedbackSondeo` y `extraerSubtemas` llamaban a Ollama directo,
 // por lo que el selector de modelo de la pantalla de Ajustes no las afectaba.
+
+/** URL de Ollama: configurable por entorno, con el valor local por defecto. */
+const URL_OLLAMA = process.env.OLLAMA_URL ?? "http://localhost:11434"
 
 export interface OpcionesModelo {
   prompt: string;
@@ -55,10 +61,11 @@ function esModeloGemini(modelo: string): boolean {
 }
 
 function quitarRazonamiento(texto: string): string {
-  // Flag "s" (dotAll) vía constructor: el target de TS del proyecto es ES2017 y no acepta el literal /…/s.
+  // Flags "gs" (global + dotAll) vía constructor: el target de TS del proyecto es ES2017
+  // y no acepta el literal /…/s. La "g" quita TODOS los bloques, no solo el primero.
   return texto
-    .replace(new RegExp("<think>.*?</think>", "s"), "")
-    .replace(new RegExp("<thinking>.*?</thinking>", "s"), "")
+    .replace(new RegExp("<think>.*?</think>", "gs"), "")
+    .replace(new RegExp("<thinking>.*?</thinking>", "gs"), "")
 }
 
 interface OpcionesOllama {
@@ -88,7 +95,7 @@ async function llamarOllama({
   //   menos VRAM, corte temprano si divaga, JSON determinista.
   // - keep_alive=30m → el 2º lote no recarga los 26b en VRAM (era ~mitad del wait).
   // - think=false → sin tokens de razonamiento basura (velocidad pura).
-  const response = await fetch("http://localhost:11434/api/generate", {
+  const response = await fetch(`${URL_OLLAMA}/api/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -122,7 +129,12 @@ async function llamarOllama({
   return quitarRazonamiento(data.response).trim()
 }
 
-async function llamarOpenAICompat(prompt: string, proveedor: ProveedorNube, esperaObjeto: boolean): Promise<string> {
+async function llamarOpenAICompat(
+  prompt: string,
+  proveedor: ProveedorNube,
+  esperaObjeto: boolean,
+  numPredict?: number
+): Promise<string> {
   const res = await fetch(`${proveedor.baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
@@ -135,6 +147,7 @@ async function llamarOpenAICompat(prompt: string, proveedor: ProveedorNube, espe
       model: proveedor.modelo || MODELO_NUBE_POR_DEFECTO,
       messages: [{ role: "user", content: prompt }],
       ...(esperaObjeto ? { response_format: { type: "json_object" } } : {}),
+      ...(typeof numPredict === "number" ? { max_tokens: numPredict } : {}),
     }),
   })
 
@@ -144,11 +157,25 @@ async function llamarOpenAICompat(prompt: string, proveedor: ProveedorNube, espe
   }
 
   const data = await res.json()
-  return String(data.choices[0].message.content)
+  const contenido = data?.choices?.[0]?.message?.content
+
+  if (typeof contenido !== "string") {
+    throw new Error(`Respuesta inesperada de ${proveedor.nombre}: ${JSON.stringify(data)}`)
+  }
+
+  return contenido.trim()
 }
 
-async function llamarGeminiNativo(prompt: string, proveedor?: ProveedorNube): Promise<string> {
+async function llamarGeminiNativo(
+  prompt: string,
+  proveedor?: ProveedorNube,
+  esperaObjeto: boolean = false,
+  numPredict?: number
+): Promise<string> {
   const apiKey = proveedor?.apiKey ?? process.env.GEMINI_API_KEY
+  if (!apiKey) {
+    throw new Error("Falta la API key de Gemini (proveedor o GEMINI_API_KEY).")
+  }
   const modelo = proveedor?.modelo || MODELO_GEMINI
   // Si el proveedor definió su propia URL se respeta; si no, se usa la de Google.
   const base = proveedor?.baseUrl || URL_GEMINI
@@ -158,7 +185,11 @@ async function llamarGeminiNativo(prompt: string, proveedor?: ProveedorNube): Pr
     url,
     JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0 },
+      generationConfig: {
+        temperature: 0,
+        ...(esperaObjeto ? { responseMimeType: "application/json" } : {}),
+        ...(typeof numPredict === "number" ? { maxOutputTokens: numPredict } : {}),
+      },
     })
   )
 
@@ -185,16 +216,23 @@ async function llamarGeminiNativo(prompt: string, proveedor?: ProveedorNube): Pr
  * Resuelve el proveedor y devuelve el texto plano del modelo.
  * Prioridad: proveedor explícito (viene del cliente en cada request, porque el server
  * no puede leer localStorage) → nombre de modelo que empieza con "gemini" → Ollama local.
+ * Todas las salidas pasan por `quitarRazonamiento`, vengan de donde vengan.
  */
 export async function llamarModelo({ prompt, modelo, proveedor, esperaObjeto = false, numPredict, esquema }: OpcionesModelo): Promise<string> {
+  // Gemini soporta JSON también para arrays, así que se activa si hay esquema.
+  const pideJsonGemini = esperaObjeto || esquema !== undefined
+
   if (proveedor) {
-    return proveedor.formato === "gemini-nativo"
-      ? llamarGeminiNativo(prompt, proveedor)
-      : llamarOpenAICompat(prompt, proveedor, esperaObjeto)
+    const crudo =
+      proveedor.formato === "gemini-nativo"
+        ? await llamarGeminiNativo(prompt, proveedor, pideJsonGemini, numPredict)
+        : await llamarOpenAICompat(prompt, proveedor, esperaObjeto, numPredict)
+    return quitarRazonamiento(crudo).trim()
   }
 
   if (esModeloGemini(modelo)) {
-    return llamarGeminiNativo(prompt)
+    const crudo = await llamarGeminiNativo(prompt, undefined, pideJsonGemini, numPredict)
+    return quitarRazonamiento(crudo).trim()
   }
 
   return llamarOllama({ modelo, prompt, numPredict, esquema, esperaObjeto })
@@ -222,35 +260,46 @@ export function recortarEntre(texto: string, apertura: string, cierre: string): 
 }
 
 function validarPregunta(parsed: unknown): Pregunta {
-  const pregunta = parsed as { pregunta?: unknown; opciones?: unknown; indiceCorrecta?: unknown }
+  const pregunta = parsed as {
+    pregunta?: unknown;
+    opciones?: unknown;
+    indiceCorrecta?: unknown;
+    explicacion?: unknown;
+  };
 
   if (Array.isArray(pregunta.opciones)) {
     pregunta.opciones = (pregunta.opciones as unknown[]).filter(
       (opcion): opcion is string => typeof opcion === "string" && opcion.trim().length > 0
-    )
+    );
   }
 
   if (
     typeof pregunta.pregunta !== "string" ||
+    pregunta.pregunta.trim().length === 0 ||
     !Array.isArray(pregunta.opciones) ||
     pregunta.opciones.length !== OPCIONES_POR_PREGUNTA ||
     !Number.isInteger(pregunta.indiceCorrecta) ||
     (pregunta.indiceCorrecta as number) < 0 ||
-    (pregunta.indiceCorrecta as number) >= pregunta.opciones.length
+    (pregunta.indiceCorrecta as number) >= pregunta.opciones.length ||
+    typeof pregunta.explicacion !== "string" ||
+    pregunta.explicacion.trim().length < 10
   ) {
-    throw new Error(`Estructura inválida: ${JSON.stringify(pregunta)}`)
+    throw new Error(`Estructura inválida: ${JSON.stringify(pregunta)}`);
   }
 
   return {
     pregunta: pregunta.pregunta,
     opciones: (pregunta.opciones as string[]).map(limpiarOpcion),
     indiceCorrecta: pregunta.indiceCorrecta as number,
-  }
+    explicacion: (pregunta.explicacion as string).trim(),
+  };
 }
 
 /**
- * Parsea un lote y descarta preguntas repetidas dentro del mismo lote.
- * Puede devolver menos de lo pedido si el modelo repitió o falló alguna.
+ * Parsea un lote y descarta preguntas repetidas dentro del mismo lote (por
+ * similitud, no solo por igualdad exacta: la misma idea reformulada también sale).
+ * Las preguntas con estructura inválida se descartan una por una en vez de tirar
+ * todo el lote. Puede devolver menos de lo pedido si el modelo repitió o falló alguna.
  */
 function parsearLotePreguntas(rawText: string): Pregunta[] {
   const limpio = recortarEntre(sinBloquesDeCodigo(rawText), "[", "]")
@@ -260,15 +309,21 @@ function parsearLotePreguntas(rawText: string): Pregunta[] {
     throw new Error(`Se esperaba un array de preguntas: ${JSON.stringify(parsed)}`)
   }
 
-  const preguntas = parsed.map(validarPregunta)
+  const preguntas: Pregunta[] = []
+  for (const item of parsed) {
+    try {
+      preguntas.push(validarPregunta(item))
+    } catch (error) {
+      console.warn("[lote] pregunta con estructura inválida, se descarta:", error)
+    }
+  }
 
-  const vistas = new Set<string>()
-  return preguntas.filter((pregunta) => {
-    const clave = pregunta.pregunta.trim().toLowerCase()
-    if (vistas.has(clave)) return false
-    vistas.add(clave)
-    return true
-  })
+  const unicas: Pregunta[] = []
+  for (const pregunta of preguntas) {
+    const repetida = unicas.some((vista) => esParecido(vista.pregunta, pregunta.pregunta))
+    if (!repetida) unicas.push(pregunta)
+  }
+  return unicas
 }
 
 async function fetchGeminiConReintento(url: string, body: string): Promise<Response> {
@@ -364,26 +419,102 @@ function fuenteParaCobertura(texto: string): string {
 function bloquePreguntasPrevias(preguntasPrevias: string[]): string {
   if (preguntasPrevias.length === 0) return ""
 
-  return `\nPreguntas ya generadas para este subtema en esta sesión (NO las repitas ni las reformules — cada pregunta nueva tiene que explorar un aspecto, ejemplo o ángulo distinto):\n${preguntasPrevias
+  return `\nPreguntas ya generadas en ESTA sesión (NO las repitas ni las reformules — cada pregunta nueva tiene que explorar un aspecto, ejemplo o ángulo distinto):\n${preguntasPrevias
     .map((pregunta, i) => `${i + 1}. ${pregunta}`)
     .join("\n")}\n`
+}
+
+/** Esquema JSON de los ángulos: paso previo barato para que el lote no repita enfoque. */
+const ESQUEMA_ASPECTOS = {
+  type: "array",
+  items: { type: "string" },
+} as Record<string, unknown>
+
+/**
+ * Paso previo de "ángulos" (~150 tokens): antes de preguntar, el modelo lista qué
+ * aspectos distintos del sub-tema se pueden evaluar. Esos ángulos entran al prompt del
+ * lote y cada pregunta se ata a uno, así no salen 3 variantes de lo mismo.
+ */
+export function construirPromptAspectos(subtema: string, excerpt: string, cuantos: number): string {
+  return `TEXTO:
+"""
+${excerpt}
+"""
+TAREA: Listá ${cuantos} aspectos DISTINTOS de "${subtema}" que se puedan evaluar con una pregunta cada uno, basándote SOLO en el TEXTO de arriba.
+Reglas:
+- Cada aspecto es UNA frase corta (menos de 12 palabras): un concepto, un ejemplo, un error típico, una diferencia, un caso límite.
+- Nada de sinónimos entre sí: si dos aspectos se responden con el mismo fragmento del texto, es UN aspecto, no dos.
+Respondé SOLO con un array JSON de strings.`
+}
+
+/**
+ * Paso previo de "ángulos": le pide al modelo la lista de aspectos y la parsea.
+ * Si el modelo devuelve basura, el lote igual se puede generar sin ángulos (se loguea).
+ */
+async function generarAspectos(
+  subtema: string,
+  textoOriginal: string,
+  modelo: string,
+  proveedor?: ProveedorNube,
+  cuantos: number = PREGUNTAS_POR_LOTE
+): Promise<string[]> {
+  const excerpt = extraerExcerpt(textoOriginal, subtema, EXCERPT_MAX_CHARS)
+  const prompt = construirPromptAspectos(subtema, excerpt, cuantos)
+  const respuesta = await llamarModelo({
+    prompt,
+    modelo,
+    proveedor,
+    esperaObjeto: false,
+    numPredict: 200,
+    esquema: ESQUEMA_ASPECTOS,
+  })
+  return parsearListaSubtemas(respuesta).slice(0, cuantos)
+}
+
+/**
+ * Recorta un lote manteniendo variedad de posiciones de respuesta: si la correcta cae
+ * casi siempre en el mismo lugar, el usuario aprende la posición y no el tema.
+ */
+export function distribuirLote(lote: Pregunta[], cuantos: number): Pregunta[] {
+  if (!distribucionSospechosa(lote)) return lote.slice(0, cuantos)
+  const porPosicion = new Map<number, Pregunta[]>()
+  for (const pregunta of lote) {
+    const grupo = porPosicion.get(pregunta.indiceCorrecta) ?? []
+    grupo.push(pregunta)
+    porPosicion.set(pregunta.indiceCorrecta, grupo)
+  }
+  // Round-robin por posición: se sirve una de cada grupo hasta completar.
+  const grupos = [...porPosicion.values()]
+  const mezcladas: Pregunta[] = []
+  for (let i = 0; mezcladas.length < lote.length; i++) {
+    for (const grupo of grupos) {
+      if (i < grupo.length) mezcladas.push(grupo[i])
+    }
+  }
+  return mezcladas.slice(0, cuantos)
 }
 
 export function construirPromptLotePreguntas(
   subtema: string,
   textoOriginal: string,
-  preguntasPrevias: string[] = []
+  preguntasPrevias: string[] = [],
+  aspectos: string[] = [],
+  cuantos: number = PREGUNTAS_POR_LOTE
 ): string {
   // Fase B.8+9 — TEXTO primero (prefix caching en Ollama) + excerpt (~1.8k) en vez
   // del documento entero (~50k de un PDF). El 26b pasa de minutos a segundos.
   const excerpt = extraerExcerpt(textoOriginal, subtema, EXCERPT_MAX_CHARS)
+  const bloqueAspectos =
+    aspectos.length > 0
+      ? `\nCada pregunta cubre UNO de estos angulos (uno por pregunta, sin repetir angulo):\n${aspectos.map((aspecto, i) => `${i + 1}. ${aspecto}`).join("\n")}\n`
+      : "\n"
   return `TEXTO:
 """
 ${excerpt}
 """
 ${bloquePreguntasPrevias(preguntasPrevias)}
-TAREA: Generá EXACTAMENTE ${PREGUNTAS_POR_LOTE} preguntas de opción múltiple sobre "${subtema}", basadas estrictamente en el TEXTO de arriba.
-Reglas: exactamente ${OPCIONES_POR_PREGUNTA} opciones por pregunta; "indiceCorrecta" entero de 0 a ${OPCIONES_POR_PREGUNTA - 1}; distractores plausibles (confusiones típicas, nunca absurdos); las ${PREGUNTAS_POR_LOTE} cubren aspectos DISTINTOS.
+TAREA: Generá EXACTAMENTE ${cuantos} preguntas de opción múltiple sobre "${subtema}", basadas estrictamente en el TEXTO de arriba.
+${bloqueAspectos}Reglas: exactamente ${OPCIONES_POR_PREGUNTA} opciones por pregunta; "indiceCorrecta" entero de 0 a ${OPCIONES_POR_PREGUNTA - 1}; VARIÁ la posición de la respuesta correcta entre las preguntas (no la pongas siempre en el mismo índice); distractores plausibles (confusiones típicas, nunca absurdos ni "todas las anteriores"); cada pregunta trae "explicacion" (1-2 frases que expliquen POR QUÉ la correcta lo es, citando el concepto del texto); las ${cuantos} cubren aspectos DISTINTOS (prohibido reformular la misma idea).
 Respondé SOLO con el array JSON, sin texto antes ni después.`
 }
 
@@ -398,8 +529,9 @@ const ESQUEMA_LOTE = {
       pregunta: { type: "string" },
       opciones: { type: "array", items: { type: "string" } },
       indiceCorrecta: { type: "integer" },
+      explicacion: { type: "string" },
     },
-    required: ["pregunta", "opciones", "indiceCorrecta"],
+    required: ["pregunta", "opciones", "indiceCorrecta", "explicacion"],
   },
 } as Record<string, unknown>
 
@@ -660,38 +792,123 @@ export async function generarPregunta(
 }
 
 /**
- * Genera el lote de preguntas de un sub-tema en UNA sola llamada al modelo.
- * `preguntasPrevias` son las que ya se generaron para ese sub-tema: se le pasan al
- * modelo para que un segundo lote no repita el primero. Con format=schema el JSON
- * sale válido a la primera, así que no se reintenta (antes eran 2 llamadas que
- * duplicaban el tiempo con gemma4:26b ante cualquier coma fuera de lugar).
+ * Genera el lote de preguntas de un sub-tema. El flujo nuevo (Tanda 2) es:
+ * 1. paso de "ángulos" (~150 tokens) para que cada pregunta cubra un aspecto distinto;
+ * 2. llamada del lote con esos ángulos + todas las preguntas ya vistas en la sesión;
+ * 3. validación local barata (forma + repetición por similitud): lo que no pasa se
+ *    descarta y, si el lote queda corto, UN reintento acotado con las rechazadas.
+ * `preguntasPrevias` ahora es de TODA la sesión (antes solo del sub-tema), porque el
+ * usuario veía la misma pregunta repetida al cambiar de sub-tema.
  */
 export async function generarLotePreguntas(
   subtema: string,
   textoOriginal: string,
   modelo: string = MODELO_PREGUNTAS_POR_DEFECTO,
   proveedor?: ProveedorNube,
-  preguntasPrevias: string[] = []
+  preguntasPrevias: string[] = [],
+  opts: {
+    aspectos?: boolean;
+    intentosRegeneracion?: number;
+    preset?: string;
+    /**
+     * Verificador semántico opcional, inyectado por el caller en vez de importado
+     * desde acá: `lib/evaluador.ts` ya depende de este módulo (usa `llamarModelo`),
+     * así que importarlo de vuelta cerraría un ciclo. Se pasa como callback y el
+     * preset decide si se usa o no.
+     */
+    juez?: (lote: Pregunta[], texto: string, modelo: string) => Promise<{
+      validas: Pregunta[];
+      rechazadas: { indice: number; motivo: string }[];
+    }>;
+  } = {}
 ): Promise<Pregunta[]> {
-  const prompt = construirPromptLotePreguntas(subtema, textoOriginal, preguntasPrevias)
-  const respuesta = await llamarModelo({
-    prompt,
-    modelo,
-    proveedor,
-    esperaObjeto: false,
-    numPredict: NUM_PREDICT_LOTE,
-    esquema: ESQUEMA_LOTE,
-  })
-
-  try {
-    const lote = parsearLotePreguntas(respuesta)
-    if (lote.length > 0) return lote
-  } catch {
-    // El schema ya fuerza el formato: si igual falla, se loguea y se corta.
+  // El preset manda: define cuántas preguntas trae el lote, si hay paso de ángulos y
+  // cuántos reintentos se permiten. Sin preset se mantiene el comportamiento anterior.
+  const ajustes = opts.preset ? ajustesDePreset(opts.preset) : null;
+  const porLote = ajustes?.preguntasPorLote ?? PREGUNTAS_POR_LOTE;
+  const usarAspectos = opts.aspectos ?? ajustes?.pasosDeAspectos ?? true;
+  const maxReintentos = opts.intentosRegeneracion ?? ajustes?.intentosRegeneracion ?? 1;
+  const numPredict = ajustes?.numPredictLote ?? NUM_PREDICT_LOTE;
+  // El juez solo corre si el preset lo pide Y el caller lo pasó. Sin él, el lote se
+  // sirve con la validación local sola (que es el comportamiento de siempre).
+  const usarJuez = Boolean(opts.juez) && (ajustes?.juezSemantico ?? false);
+  let aspectos: string[] = [];
+  if (usarAspectos) {
+    try {
+      aspectos = await generarAspectos(subtema, textoOriginal, modelo, proveedor, porLote);
+    } catch (error) {
+      // El lote puede generarse sin ángulos: se loguea y se sigue.
+      console.error("[lote] falló el paso de ángulos, se sigue sin ellos:", error);
+    }
   }
+  const vistas: string[] = [...preguntasPrevias];
+  let mejores: Pregunta[] = [];
+  let ultimoRechazo: string[] = [];
+  for (let intento = 0; intento <= maxReintentos; intento++) {
+    // Lo que el validador rechazó en el intento anterior: se le devuelve al
+    // modelo como "esto NO sirve" para que la segunda pasada no repita.
+    const prompt = construirPromptLotePreguntas(
+      subtema,
+      textoOriginal,
+      [...vistas, ...ultimoRechazo],
+      aspectos,
+      porLote
+    );
+    const respuesta = await llamarModelo({
+      prompt,
+      modelo,
+      proveedor,
+      esperaObjeto: false,
+      numPredict,
+      esquema: ESQUEMA_LOTE,
+    });
 
-  console.error("=== RAW MODEL RESPONSE (generarLotePreguntas) ===", respuesta)
-  throw new Error("Failed to parse model response as JSON: el lote no tiene preguntas válidas")
+    let lote: Pregunta[];
+    try {
+      lote = parsearLotePreguntas(respuesta);
+    } catch {
+      console.error("=== RAW MODEL RESPONSE (generarLotePreguntas) ===", respuesta);
+      throw new Error("Failed to parse model response as JSON: el lote no tiene preguntas válidas");
+    }
+    const validacion = validarLote(lote, vistas);
+    let validas = validacion.validas;
+    const rechazadas = [...validacion.rechazadas];
+    ultimoRechazo = rechazadas.map((r) => lote[r.indice].pregunta);
+    for (const r of rechazadas) {
+      console.warn(`[lote] descartada #${r.indice} (${subtema}): ${r.motivo}`);
+    }
+
+    // Segunda vuelta, más cara: el juez contrasta cada sobreviviente contra el texto.
+    // Solo miran las que ya pasaron la validación local, así que el juez nunca ve
+    // basura y su trabajo se va en lo que la heurística NO puede ver (veracidad).
+    if (usarJuez && validas.length > 0 && opts.juez) {
+      try {
+        const veredicto = await opts.juez(validas, textoOriginal, modelo);
+        // Los rechazos del juez se realinean a índices del LOTE (no de `validas`) para
+        // que `ultimoRechazo` siga CONTENTÁNDOSE con el índice que se está iterando.
+        for (const r of veredicto.rechazadas) {
+          const original = validas[r.indice];
+          if (!original) continue;
+          ultimoRechazo.push(original.pregunta);
+          console.warn(`[lote] descartada por el juez (${subtema}): ${r.motivo}`);
+        }
+        validas = veredicto.validas;
+      } catch (error) {
+        // El juez es un extra, no un requisito: si falla, el lote sigue con lo que
+        // pasó la validación local en vez de perder el intento entero.
+        console.error("[lote] falló el juez semántico, se sigue sin él:", error);
+      }
+    }
+
+    const candidatas = distribuirLote([...mejores, ...validas], porLote);
+    if (candidatas.length >= mejores.length) mejores = candidatas;
+    vistas.push(...validas.map((p) => p.pregunta));
+    if (mejores.length >= porLote) break;
+  }
+  if (mejores.length > 0) return mejores.slice(0, porLote);
+
+  console.error("=== LOTE VACÍO tras validación ===", { subtema });
+  throw new Error("Failed to parse model response as JSON: el lote no tiene preguntas válidas");
 }
 
 export interface ResultadoSubtema {
