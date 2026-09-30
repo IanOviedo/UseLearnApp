@@ -64,3 +64,36 @@ export const SUBTEMAS_HEAD_CHARS = 3500;
  *  que el lote del próximo tiene que estar generándose desde la 1ª pregunta (antes el
  *  umbral era 1 y nunca disparaba con lotes completos → cada transición esperaba al modelo). */
 export const PREGEN_UMBRAL_PENDIENTES = 2;
+
+// --- Fase C (plan → enseñar/practicar) ---------------------------------------
+
+/**
+ * Respuestas mínimas sin errores para que un sub-tema pase directo a "practicar" en vez
+ * de "asegurar". Con lotes de 3 y 2 aciertos seguidos para dominar, un sub-tema domi-
+ * nado sin errores queda con ~4 intentos: por debajo de eso el sondeo lo cubrió muy
+ * rápido y conviene repasar antes de ejercitar.
+ */
+export const INTENTOS_MINIMOS_PARA_PRACTICA = 4;
+
+// --- Fase D (material: enseñar/practicar) ------------------------------------
+
+/** Explicaciones que se generan por sub-tema (la ruta `asegurar` pide solo 1). */
+export const EXPLICACIONES_POR_BLOQUE = 3;
+
+/**
+ * Tope de ejercicios por sub-tema: 1 quiz conceptual + 1 par de código (js y jsx con el
+ * mismo problema). Temas no programables devuelven 2 quiz.
+ */
+export const EJERCICIOS_POR_BLOQUE = 3;
+
+/** Tope de tokens: explicaciones (3 bloques cortos) y ejercicios (enunciado+tests+sol). */
+export const NUM_PREDICT_EXPLICACIONES = 900;
+export const NUM_PREDICT_EJERCICIOS = 1600;
+
+// --- Fase C1 (modalidades) ---------------------------------------------------
+
+/**
+ * Tope de tokens del apunte sintético de la modalidad "tema libre": ~800-1100 palabras
+ * más el título. Si el tope queda corto el JSON viene truncado y se pierde el apunte.
+ */
+export const NUM_PREDICT_APUNTE = 3000;

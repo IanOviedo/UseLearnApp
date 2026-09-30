@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  contarAprendizaje,
   contarProgresoSesion,
   obtenerHistorialSesion,
   obtenerSesion,
@@ -7,7 +8,11 @@ import {
   obtenerSubtemasDebiles,
   obtenerSubtemasSinDominar,
 } from "@/lib/db";
+import { calcularRutaEnsenanza } from "@/lib/practica";
 import type { EstadoSesion } from "@/lib/tipos";
+
+/** Fases conocidas: cualquier valor desconocido de la base cae en "sondeo". */
+const FASES: EstadoSesion["fase"][] = ["sondeo", "plan", "ensenar", "cerrar"];
 
 /**
  * Estado completo de una sesión. Es lo que permite reanudar en vez de reiniciar:
@@ -42,9 +47,12 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     const estado: EstadoSesion = {
       id: sesion.id,
       tema: sesion.topic,
-      // Cualquier fase distinta de "plan" todavía está en el sondeo (enseñar y cerrar
-      // se agregan en las fases siguientes).
-      fase: sesion.faseActual === "plan" ? "plan" : "sondeo",
+      // Fase C2 — ahora se devuelven todas las fases (antes "plan" y lo demás era sondeo).
+      fase: (FASES as string[]).includes(sesion.faseActual)
+        ? (sesion.faseActual as EstadoSesion["fase"])
+        : "sondeo",
+      modo: sesion.modo === "tema_libre" ? "tema_libre" : "apunte",
+      objetivo: sesion.objetivo,
       modelo: sesion.modelo,
       creadaEn: sesion.creadaEn,
       feedback: sesion.feedbackFinal,
@@ -52,6 +60,11 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
       subtemas,
       subtemasDebiles: obtenerSubtemasDebiles(sesionId),
       subtemasSinDominar: obtenerSubtemasSinDominar(sesionId),
+      // Rutas del plan (reforzar/asegurar/practicar/sin_evaluar): se calculan acá con
+      // los contadores de la base para que el cliente no tenga que derivarlas.
+      rutas: calcularRutaEnsenanza(subtemas),
+      // Conteos de material (Fase D) para el sidebar de práctica.
+      aprendizaje: contarAprendizaje(sesionId),
       historial: obtenerHistorialSesion(sesionId),
     };
 

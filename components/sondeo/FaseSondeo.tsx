@@ -9,7 +9,8 @@ import {
   IconoEquis,
   IconoFlecha,
 } from "@/components/ui/Iconos";
-import { proveedorDeModelo, type ProveedorNube } from "@/lib/proveedores";
+import { type ProveedorNube } from "@/lib/proveedores";
+import { leerConfigLocal } from "@/lib/config-cliente";
 import type { ItemHistorial, LoteItem, Pregunta, ProgresoSondeo } from "@/lib/tipos";
 
 interface SiguientePreguntaResponse {
@@ -127,26 +128,6 @@ function agregarProveedorAParams(
   params.set(`${prefijo}ApiKey`, proveedor.apiKey);
   params.set(`${prefijo}Formato`, proveedor.formato);
   if (proveedor.modelo) params.set(`${prefijo}Modelo`, proveedor.modelo);
-}
-
-/** Lee toda la config del localStorage en un solo lugar. */
-function leerConfigLocal() {
-  const modeloPreguntas = localStorage.getItem("uselearn:modeloPreguntas") ?? "";
-  const modeloPrincipal = localStorage.getItem("uselearn:modeloPrincipal") ?? "";
-  let proveedores: ProveedorNube[] = [];
-  try {
-    proveedores = JSON.parse(localStorage.getItem("proveedoresNube") ?? "[]") as ProveedorNube[];
-  } catch {
-    proveedores = [];
-  }
-  return {
-    modeloPreguntas,
-    modeloPrincipal,
-    proveedorPreguntas: proveedorDeModelo(proveedores, modeloPreguntas),
-    proveedorPrincipal: proveedorDeModelo(proveedores, modeloPrincipal),
-    // Fase B.11 — el usuario puede apagar la pre-generación desde Ajustes.
-    pregen: localStorage.getItem("uselearn:pregen") !== "0",
-  };
 }
 
 /**

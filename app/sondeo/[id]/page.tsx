@@ -4,9 +4,11 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import FaseSondeo from "@/components/sondeo/FaseSondeo";
 import FasePlan from "@/components/sondeo/FasePlan";
+import FaseCierre from "@/components/sondeo/FaseCierre";
+import FaseEnsenar from "@/components/aprender/FaseEnsenar";
 import type { EstadoSesion } from "@/lib/tipos";
 
-type Fase = "sondeo" | "plan";
+type Fase = "sondeo" | "plan" | "ensenar" | "cerrar";
 
 export default function SondeoPage() {
   const params = useParams();
@@ -75,6 +77,28 @@ export default function SondeoPage() {
     []
   );
 
+  /**
+   * Fase C2/D — las transiciones de fase se persisten en el servidor ANTES de avanzar
+   * (recargar la página ya no retrocede al sondeo ni pierde el plan). Si el server
+   * rechaza, la promesa rechaza y el componente que disparó el cambio muestra el error.
+   */
+  const transicionar = useCallback(
+    async (destino: Exclude<Fase, "sondeo">) => {
+      const res = await fetch(`/api/sesiones/${sesionId}/fase`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fase: destino }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setFase(destino);
+    },
+    [sesionId]
+  );
+
+  const manejarEmpezar = useCallback(() => transicionar("ensenar"), [transicionar]);
+  const manejarCierre = useCallback(() => transicionar("cerrar"), [transicionar]);
+
   if (!idInvalido && cargando) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-neutral-950 text-neutral-100">
@@ -109,8 +133,20 @@ export default function SondeoPage() {
         feedback={feedback}
         subtemasDebiles={subtemasDebiles}
         subtemasSinDominar={subtemasSinDominar}
+        rutas={estado.rutas}
+        onEmpezar={manejarEmpezar}
         onVolver={() => router.push("/")}
       />
+    );
+  }
+
+  if (fase === "ensenar") {
+    return <FaseEnsenar sesionId={sesionId} estado={estado} onCerrar={manejarCierre} />;
+  }
+
+  if (fase === "cerrar") {
+    return (
+      <FaseCierre tema={estado.tema} feedback={feedback} onVolver={() => router.push("/")} />
     );
   }
 

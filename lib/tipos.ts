@@ -1,6 +1,91 @@
 // Tipos compartidos entre el servidor y el cliente.
 // Antes vivían duplicados (cada componente definía su propia interfaz Pregunta).
 
+/**
+ * Fase C1 — modalidad de entrada de una sesión:
+ * - `apunte`: el usuario pegó su propio texto (fidelidad estricta a ese texto).
+ * - `tema_libre`: el usuario escribió un tema y la app genera el apunte de estudio.
+ */
+export type ModoSesion = "apunte" | "tema_libre";
+
+/** Nivel que guía la profundidad del apunte sintético (modalidad tema libre). */
+export type NivelSesion = "basico" | "intermedio" | "avanzado";
+
+/**
+ * Fase C2 — ruta que el plan asigna a cada sub-tema para la fase Enseñar/Practicar:
+ * - `reforzar`: falló al menos una vez → enseñar (anclado al error) + practicar.
+ * - `asegurar`: dominado sin errores pero con pocos intentos → repaso breve + practicar.
+ * - `practicar`: dominado y con práctica suficiente → solo ejercicios.
+ * - `sin_evaluar`: el sondeo nunca lo preguntó → enseñar desde cero + practicar.
+ */
+export type RutaSubtema = "reforzar" | "asegurar" | "practicar" | "sin_evaluar";
+
+export interface BloqueRuta {
+  subtemaId: number;
+  nombre: string;
+  ruta: RutaSubtema;
+}
+
+// --- Fase D — material de la fase Enseñar/Practicar --------------------------
+
+/** Tipos de bloque de explicación. El modelo puede devolver otro: se normaliza al leer. */
+export type TipoExplicacion = "que_es" | "como_se_usa" | "variaciones" | "mas_texto";
+
+export interface Explicacion {
+  id: number;
+  subtemaId: number;
+  orden: number;
+  tipo: string;
+  titulo: string;
+  contenido: string;
+  ejemplo: string | null;
+}
+
+/** Una condición de verificación: `test` es una expresión JS que debe evaluar a true. */
+export interface AssertionEjercicio {
+  descripcion: string;
+  test: string;
+}
+
+export interface Ejercicio {
+  id: number;
+  subtemaId: number;
+  orden: number;
+  tipo: "codigo" | "quiz";
+  /** "js" | "jsx" para código, "ninguno" para quiz. */
+  lenguaje: string;
+  /** Par del mismo problema en otro lenguaje (ej. "js" ↔ "jsx"). */
+  variante: string | null;
+  enunciado: string;
+  /** Código inicial en el editor (ejercicios de código). */
+  plantilla: string | null;
+  assertions: AssertionEjercicio[];
+  /** Preguntas de opción múltiple (ejercicios quiz). */
+  opciones: string[] | null;
+  indiceCorrecta: number | null;
+  pista: string | null;
+  solucion: string | null;
+  dificultad: string;
+}
+
+export interface IntentoEjercicio {
+  id: number;
+  ejercicioId: number;
+  codigo: string;
+  aprobado: boolean;
+  /** Salida del runner: logs + resultados por assertion (JSON serializado). */
+  salida: string | null;
+  creadoEn: string;
+}
+
+/** Conteo rápido por sub-tema para el sidebar de la fase Enseñar (Fase D). */
+export interface ConteoAprendizaje {
+  subtemaId: number;
+  explicaciones: number;
+  ejercicios: number;
+  ejerciciosAprobados: number;
+}
+
 export interface Pregunta {
   pregunta: string;
   opciones: string[];
@@ -42,7 +127,11 @@ export interface LoteItem {
 export interface EstadoSesion {
   id: number;
   tema: string;
-  fase: "sondeo" | "plan";
+  fase: "sondeo" | "plan" | "ensenar" | "cerrar";
+  /** Modalidad con la que se creó la sesión (Fase C1). */
+  modo: ModoSesion;
+  /** Objetivo escrito en modo `tema_libre` (si lo había). */
+  objetivo: string | null;
   modelo: string | null;
   creadaEn: string;
   feedback: string | null;
@@ -51,6 +140,10 @@ export interface EstadoSesion {
   subtemasDebiles: string[];
   /** Sub-temas sin dominar (`cubierto = 0`): el plan los muestra como pendientes. */
   subtemasSinDominar: string[];
+  /** Ruta por sub-tema calculada en el servidor (Fase C2): es lo que dice qué practicar. */
+  rutas: BloqueRuta[];
+  /** Conteos de material por sub-tema (Fase D): alimentan el sidebar de práctica. */
+  aprendizaje: ConteoAprendizaje[];
   historial: ItemHistorial[];
 }
 

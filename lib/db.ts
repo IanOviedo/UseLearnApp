@@ -2,7 +2,17 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { ACIERTOS_SEGUIDOS_PARA_DOMINAR } from "./config";
 import { normalizarTexto } from "./texto";
-import type { ItemHistorial, Pregunta, ProgresoSondeo, SubtemaEstado } from "./tipos";
+import type {
+  AssertionEjercicio,
+  ConteoAprendizaje,
+  Ejercicio,
+  Explicacion,
+  IntentoEjercicio,
+  ItemHistorial,
+  Pregunta,
+  ProgresoSondeo,
+  SubtemaEstado,
+} from "./tipos";
 
 // Ruta absoluta: antes era "useLearn.db" relativo al directorio de trabajo, así que
 // abrir el server desde otra carpeta creaba una base vacía y "desaparecían" las sesiones.
@@ -51,6 +61,48 @@ db.exec(`CREATE TABLE IF NOT EXISTS respuestas (
   corregido_en TEXT
 )`);
 
+// Fase D — material de la fase Enseñar/Practicar. El patrón es el mismo que preguntas:
+// columnas consultables + el contenido en JSON/TEXT, y todo se guarda por sub-tema.
+db.exec(`CREATE TABLE IF NOT EXISTS explicaciones (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sesion_id INTEGER NOT NULL REFERENCES sesiones(id),
+  subtema_id INTEGER NOT NULL REFERENCES subtemas(id),
+  orden INTEGER NOT NULL,
+  tipo TEXT NOT NULL,
+  titulo TEXT NOT NULL,
+  contenido TEXT NOT NULL,
+  ejemplo TEXT,
+  creada_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+)`);
+
+db.exec(`CREATE TABLE IF NOT EXISTS ejercicios (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sesion_id INTEGER NOT NULL REFERENCES sesiones(id),
+  subtema_id INTEGER NOT NULL REFERENCES subtemas(id),
+  orden INTEGER NOT NULL DEFAULT 0,
+  tipo TEXT NOT NULL CHECK (tipo IN ('codigo', 'quiz')),
+  lenguaje TEXT NOT NULL DEFAULT 'ninguno',
+  variante TEXT,
+  enunciado TEXT NOT NULL,
+  plantilla TEXT,
+  assertions TEXT,
+  opciones TEXT,
+  indice_correcta INTEGER,
+  pista TEXT,
+  solucion TEXT,
+  dificultad TEXT NOT NULL DEFAULT 'media',
+  creada_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+)`);
+
+db.exec(`CREATE TABLE IF NOT EXISTS intentos_ejercicio (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ejercicio_id INTEGER NOT NULL REFERENCES ejercicios(id),
+  codigo TEXT NOT NULL,
+  aprobado INTEGER NOT NULL,
+  salida TEXT,
+  creado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+)`);
+
 // --- Migraciones -------------------------------------------------------------
 // Mismo patrón que ya usaba el proyecto: si la columna no existe, se agrega.
 // Es idempotente, así que correrlo en cada arranque es seguro.
@@ -75,11 +127,19 @@ asegurarColumna("subtemas", "total_intentos", "INTEGER NOT NULL DEFAULT 0");
 // Preguntas de un lote que quedaron sin usar porque el sub-tema ya se dominó: dejan de
 // contar en el total del sondeo (antes inflaban para siempre el contador "x de y").
 asegurarColumna("preguntas", "descartada", "INTEGER NOT NULL DEFAULT 0");
+// Fase C1 — dos modalidades de entrada: notas pegadas vs. tema libre (donde el apunte
+// lo genera el modelo y queda guardado como texto_original).
+asegurarColumna("sesiones", "modo", "TEXT NOT NULL DEFAULT 'apunte'");
+asegurarColumna("sesiones", "objetivo", "TEXT");
+asegurarColumna("sesiones", "nivel", "TEXT");
 
 db.exec("CREATE INDEX IF NOT EXISTS idx_preguntas_subtema ON preguntas(subtema_id, respondida)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_preguntas_sesion ON preguntas(sesion_id, descartada)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_subtemas_sesion ON subtemas(sesion_id)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_respuestas_pregunta ON respuestas(pregunta_id)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_explicaciones_bloque ON explicaciones(sesion_id, subtema_id, orden)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_ejercicios_bloque ON ejercicios(sesion_id, subtema_id, orden)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_intentos_ejercicio ON intentos_ejercicio(ejercicio_id)");
 
 // --- Tipos ------------------------------------------------------------------
 
@@ -91,6 +151,10 @@ export interface Sesion {
   modelo: string | null;
   creadaEn: string;
   feedbackFinal: string | null;
+  /** Modalidad de entrada (Fase C1): "apunte" | "tema_libre". */
+  modo: string;
+  objetivo: string | null;
+  nivel: string | null;
 }
 
 export interface EstadoSondeo {
@@ -111,12 +175,28 @@ export interface ResultadoRespuesta {
 
 // --- Sesiones ---------------------------------------------------------------
 
-function crearSesion(topic: string, textoOriginal: string, modelo: string | null = null): number {
+/** Extras opcionales que viajan con la creación (Fase C1 — modalidades). */
+interface NuevaSesion {
+  modo?: string;
+  objetivo?: string | null;
+  nivel?: string | null;
+}
+
+function crearSesion(topic: string, textoOriginal: string, modelo: string | null = null, extras: NuevaSesion = {}): number {
   // El modelo se guarda: antes la columna existía pero quedaba siempre en NULL, así que
   // no había forma de saber con qué modelo se había generado una sesión.
   const result = db
-    .prepare("INSERT INTO sesiones (topic, texto_original, modelo) VALUES (?, ?, ?)")
-    .run(topic, textoOriginal, modelo);
+    .prepare(
+      "INSERT INTO sesiones (topic, texto_original, modelo, modo, objetivo, nivel) VALUES (?, ?, ?, ?, ?, ?)"
+    )
+    .run(
+      topic,
+      textoOriginal,
+      modelo,
+      extras.modo ?? "apunte",
+      extras.objetivo ?? null,
+      extras.nivel ?? null
+    );
 
   return Number(result.lastInsertRowid);
 }
@@ -124,7 +204,7 @@ function crearSesion(topic: string, textoOriginal: string, modelo: string | null
 function obtenerSesion(sesionId: number): Sesion | null {
   const row = db
     .prepare(
-      "SELECT id, topic, texto_original, fase_actual, modelo, creada_en, feedback_final FROM sesiones WHERE id = ?"
+      "SELECT id, topic, texto_original, fase_actual, modelo, creada_en, feedback_final, modo, objetivo, nivel FROM sesiones WHERE id = ?"
     )
     .get(sesionId) as
     | {
@@ -135,6 +215,9 @@ function obtenerSesion(sesionId: number): Sesion | null {
         modelo: string | null;
         creada_en: string;
         feedback_final: string | null;
+        modo: string;
+        objetivo: string | null;
+        nivel: string | null;
       }
     | undefined;
 
@@ -148,6 +231,10 @@ function obtenerSesion(sesionId: number): Sesion | null {
     modelo: row.modelo,
     creadaEn: row.creada_en,
     feedbackFinal: row.feedback_final,
+    // Sesiones antiguas creadas antes de la migración quedan con 'apunte' (el DEFAULT).
+    modo: row.modo === "tema_libre" ? "tema_libre" : "apunte",
+    objetivo: row.objetivo,
+    nivel: row.nivel,
   };
 }
 
@@ -186,6 +273,13 @@ function listarSesionesConEstado(): {
 }
 
 const eliminarSesion = db.transaction((sesionId: number): void => {
+  // Orden por FKs: intentos → ejercicios → explicaciones → respuestas → preguntas →
+  // subtemas → sesiones. Con foreign_keys = ON, borrar en otro orden tira un error.
+  db.prepare(
+    "DELETE FROM intentos_ejercicio WHERE ejercicio_id IN (SELECT id FROM ejercicios WHERE sesion_id = ?)"
+  ).run(sesionId);
+  db.prepare("DELETE FROM ejercicios WHERE sesion_id = ?").run(sesionId);
+  db.prepare("DELETE FROM explicaciones WHERE sesion_id = ?").run(sesionId);
   db.prepare("DELETE FROM respuestas WHERE pregunta_id IN (SELECT id FROM preguntas WHERE sesion_id = ?)").run(sesionId);
   db.prepare("DELETE FROM preguntas WHERE sesion_id = ?").run(sesionId);
   db.prepare("DELETE FROM subtemas WHERE sesion_id = ?").run(sesionId);
@@ -210,6 +304,63 @@ function finalizarSondeo(sesionId: number, feedback: string): void {
 function agregarSubtema(sesionId: number, nombre: string): number {
   const result = db.prepare("INSERT INTO subtemas (sesion_id, nombre) VALUES (?, ?)").run(sesionId, nombre);
   return Number(result.lastInsertRowid);
+}
+
+/** Resultado del descarte de sub-temas (Fase C1). `motivo` explica por qué no se pudo. */
+interface ResultadoDescarte {
+  ok: boolean;
+  restantes: number;
+  motivo?: string;
+}
+
+/**
+ * Fase C1 — quita sub-temas antes de que empiece el sondeo (ingesta explícita): la
+ * pantalla de confirmación de la landing permite desmarcar sub-temas detectados.
+ * Guardas: solo mientras la sesión sigue en "sondeo" y sin respuestas (borrar sub-temas
+ * con respuestas rompería la FK respuestas → preguntas y contaría mal el progreso).
+ */
+function descartarSubtemas(sesionId: number, mantenerIds: number[]): ResultadoDescarte {
+  const ids = Array.from(
+    new Set(mantenerIds.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0))
+  );
+
+  const sesion = db.prepare("SELECT fase_actual FROM sesiones WHERE id = ?").get(sesionId) as
+    | { fase_actual: string }
+    | undefined;
+
+  if (!sesion) return { ok: false, restantes: 0, motivo: "Sesión no encontrada." };
+  if (ids.length === 0) return { ok: false, restantes: 0, motivo: "Hay que mantener al menos un sub-tema." };
+  if (sesion.fase_actual !== "sondeo") {
+    return { ok: false, restantes: 0, motivo: "La sesión ya avanzó de fase: no se pueden quitar sub-temas." };
+  }
+
+  const respondidas = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM respuestas r JOIN preguntas p ON p.id = r.pregunta_id WHERE p.sesion_id = ?`
+    )
+    .get(sesionId) as { n: number };
+
+  if (respondidas.n > 0) {
+    return { ok: false, restantes: 0, motivo: "Ya hay respuestas en esta sesión: no se pueden quitar sub-temas." };
+  }
+
+  const placeholders = ids.map(() => "?").join(",");
+
+  const restantes = db.transaction(() => {
+    // Las preguntas de los sub-temas descartados se borran primero: no hay respuestas
+    // (revisado arriba), así que la FK no se rompe.
+    db.prepare(`DELETE FROM preguntas WHERE sesion_id = ? AND subtema_id NOT IN (${placeholders})`).run(
+      sesionId,
+      ...ids
+    );
+    db.prepare(`DELETE FROM subtemas WHERE sesion_id = ? AND id NOT IN (${placeholders})`).run(sesionId, ...ids);
+    const fila = db.prepare("SELECT COUNT(*) AS n FROM subtemas WHERE sesion_id = ?").get(sesionId) as {
+      n: number;
+    };
+    return fila.n;
+  })();
+
+  return { ok: true, restantes };
 }
 
 function obtenerSubtemas(sesionId: number): SubtemaEstado[] {
@@ -518,6 +669,254 @@ function obtenerHistorialSesion(sesionId: number): ItemHistorial[] {
   return historial;
 }
 
+// --- Material de aprendizaje (Fase D) ----------------------------------------
+
+/** Explicación lista para insertar (el llamador ya validó contenido y orden). */
+interface NuevaExplicacion {
+  subtemaId: number;
+  orden: number;
+  tipo: string;
+  titulo: string;
+  contenido: string;
+  ejemplo?: string | null;
+}
+
+/** Ejercicio listo para insertar; los campos JSON se serializan acá (un solo lugar). */
+interface NuevoEjercicio {
+  subtemaId: number;
+  orden?: number;
+  tipo: "codigo" | "quiz";
+  lenguaje?: string;
+  variante?: string | null;
+  enunciado: string;
+  plantilla?: string | null;
+  assertions?: AssertionEjercicio[];
+  opciones?: string[] | null;
+  indiceCorrecta?: number | null;
+  pista?: string | null;
+  solucion?: string | null;
+  dificultad?: string;
+}
+
+/** Parseo tolerante: una columna JSON ilegible no debería tumbar la fase entera. */
+function parsearJson<T>(texto: string | null, respaldo: T): T {
+  if (!texto) return respaldo;
+  try {
+    return JSON.parse(texto) as T;
+  } catch {
+    return respaldo;
+  }
+}
+
+/** Guarda las explicaciones de un sub-tema en una sola transacción (patrón del lote). */
+const guardarExplicaciones = db.transaction((sesionId: number, items: NuevaExplicacion[]): number[] => {
+  const stmt = db.prepare(
+    "INSERT INTO explicaciones (sesion_id, subtema_id, orden, tipo, titulo, contenido, ejemplo) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  );
+  return items.map((item) =>
+    Number(
+      stmt.run(
+        sesionId,
+        item.subtemaId,
+        item.orden,
+        item.tipo,
+        item.titulo,
+        item.contenido,
+        item.ejemplo ?? null
+      ).lastInsertRowid
+    )
+  );
+});
+
+/** Guarda los ejercicios de un sub-tema en una sola transacción. */
+const guardarEjercicios = db.transaction((sesionId: number, items: NuevoEjercicio[]): number[] => {
+  const stmt = db.prepare(
+    `INSERT INTO ejercicios
+       (sesion_id, subtema_id, orden, tipo, lenguaje, variante, enunciado, plantilla,
+        assertions, opciones, indice_correcta, pista, solucion, dificultad)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  return items.map((item, indice) =>
+    Number(
+      stmt.run(
+        sesionId,
+        item.subtemaId,
+        item.orden ?? indice,
+        item.tipo,
+        item.lenguaje ?? "ninguno",
+        item.variante ?? null,
+        item.enunciado,
+        item.plantilla ?? null,
+        item.assertions && item.assertions.length > 0 ? JSON.stringify(item.assertions) : null,
+        item.opciones && item.opciones.length > 0 ? JSON.stringify(item.opciones) : null,
+        item.indiceCorrecta ?? null,
+        item.pista ?? null,
+        item.solucion ?? null,
+        item.dificultad ?? "media"
+      ).lastInsertRowid
+    )
+  );
+});
+
+function obtenerExplicaciones(sesionId: number, subtemaId: number): Explicacion[] {
+  const filas = db
+    .prepare(
+      `SELECT id, subtema_id, orden, tipo, titulo, contenido, ejemplo
+       FROM explicaciones WHERE sesion_id = ? AND subtema_id = ? ORDER BY orden, id`
+    )
+    .all(sesionId, subtemaId) as {
+    id: number;
+    subtema_id: number;
+    orden: number;
+    tipo: string;
+    titulo: string;
+    contenido: string;
+    ejemplo: string | null;
+  }[];
+
+  return filas.map((fila) => ({
+    id: fila.id,
+    subtemaId: fila.subtema_id,
+    orden: fila.orden,
+    tipo: fila.tipo,
+    titulo: fila.titulo,
+    contenido: fila.contenido,
+    ejemplo: fila.ejemplo,
+  }));
+}
+
+/** Fila cruda de `ejercicios`, compartida por los dos lectores de abajo. */
+interface FilaEjercicio {
+  id: number;
+  sesion_id?: number;
+  subtema_id: number;
+  orden: number;
+  tipo: string;
+  lenguaje: string;
+  variante: string | null;
+  enunciado: string;
+  plantilla: string | null;
+  assertions: string | null;
+  opciones: string | null;
+  indice_correcta: number | null;
+  pista: string | null;
+  solucion: string | null;
+  dificultad: string;
+}
+
+function filaAEjercicio(fila: FilaEjercicio): Ejercicio {
+  return {
+    id: fila.id,
+    subtemaId: fila.subtema_id,
+    orden: fila.orden,
+    tipo: fila.tipo === "quiz" ? ("quiz" as const) : ("codigo" as const),
+    lenguaje: fila.lenguaje,
+    variante: fila.variante,
+    enunciado: fila.enunciado,
+    plantilla: fila.plantilla,
+    assertions: parsearJson<AssertionEjercicio[]>(fila.assertions, []),
+    opciones: parsearJson<string[] | null>(fila.opciones, null),
+    indiceCorrecta: fila.indice_correcta,
+    pista: fila.pista,
+    solucion: fila.solucion,
+    dificultad: fila.dificultad,
+  };
+}
+
+function obtenerEjercicios(sesionId: number, subtemaId: number): Ejercicio[] {
+  const filas = db
+    .prepare(
+      `SELECT id, subtema_id, orden, tipo, lenguaje, variante, enunciado, plantilla,
+              assertions, opciones, indice_correcta, pista, solucion, dificultad
+       FROM ejercicios WHERE sesion_id = ? AND subtema_id = ? ORDER BY orden, id`
+    )
+    .all(sesionId, subtemaId) as FilaEjercicio[];
+
+  return filas.map(filaAEjercicio);
+}
+
+/** Un ejercicio por id (el endpoint de intentos lo usa para corregir quiz en el server). */
+function obtenerEjercicioPorId(ejercicioId: number): (Ejercicio & { sesionId: number }) | null {
+  const fila = db
+    .prepare(
+      `SELECT id, sesion_id, subtema_id, orden, tipo, lenguaje, variante, enunciado, plantilla,
+              assertions, opciones, indice_correcta, pista, solucion, dificultad
+       FROM ejercicios WHERE id = ?`
+    )
+    .get(ejercicioId) as FilaEjercicio | undefined;
+
+  if (!fila) return null;
+  return { ...filaAEjercicio(fila), sesionId: fila.sesion_id ?? 0 };
+}
+
+/** Registra un intento (aprobado por el runner del sandbox o por el quiz). */
+const registrarIntentoEjercicio = db.transaction(
+  (ejercicioId: number, codigo: string, aprobado: boolean, salida: string | null): number => {
+    const result = db
+      .prepare(
+        "INSERT INTO intentos_ejercicio (ejercicio_id, codigo, aprobado, salida) VALUES (?, ?, ?, ?)"
+      )
+      .run(ejercicioId, codigo, aprobado ? 1 : 0, salida);
+    return Number(result.lastInsertRowid);
+  }
+);
+
+function obtenerIntentosEjercicio(ejercicioId: number): IntentoEjercicio[] {
+  const filas = db
+    .prepare(
+      `SELECT id, ejercicio_id, codigo, aprobado, salida, creado_en
+       FROM intentos_ejercicio WHERE ejercicio_id = ? ORDER BY id`
+    )
+    .all(ejercicioId) as {
+    id: number;
+    ejercicio_id: number;
+    codigo: string;
+    aprobado: number;
+    salida: string | null;
+    creado_en: string;
+  }[];
+
+  return filas.map((fila) => ({
+    id: fila.id,
+    ejercicioId: fila.ejercicio_id,
+    codigo: fila.codigo,
+    aprobado: fila.aprobado === 1,
+    salida: fila.salida,
+    creadoEn: fila.creado_en,
+  }));
+}
+
+/**
+ * Conteos por sub-tema en UNA consulta: son lo que el sidebar de práctica muestra como
+ * "3/3 explicaciones · 1/2 ejercicios" sin traer el material completo de toda la sesión.
+ */
+function contarAprendizaje(sesionId: number): ConteoAprendizaje[] {
+  const filas = db
+    .prepare(
+      `SELECT s.id AS subtemaId,
+              (SELECT COUNT(*) FROM explicaciones x WHERE x.subtema_id = s.id) AS explicaciones,
+              (SELECT COUNT(*) FROM ejercicios e WHERE e.subtema_id = s.id) AS ejercicios,
+              (SELECT COUNT(*) FROM ejercicios e2
+                 WHERE e2.subtema_id = s.id
+                   AND EXISTS (SELECT 1 FROM intentos_ejercicio i
+                               WHERE i.ejercicio_id = e2.id AND i.aprobado = 1)) AS ejerciciosAprobados
+       FROM subtemas s WHERE s.sesion_id = ? ORDER BY s.id`
+    )
+    .all(sesionId) as {
+    subtemaId: number;
+    explicaciones: number;
+    ejercicios: number;
+    ejerciciosAprobados: number;
+  }[];
+
+  return filas.map((fila) => ({
+    subtemaId: fila.subtemaId,
+    explicaciones: fila.explicaciones,
+    ejercicios: fila.ejercicios,
+    ejerciciosAprobados: fila.ejerciciosAprobados,
+  }));
+}
+
 // --- Progreso ---------------------------------------------------------------
 
 function contarProgresoSesion(sesionId: number, subtemas?: SubtemaEstado[]): ProgresoSondeo {
@@ -558,7 +957,16 @@ export default db;
 export {
   crearSesion,
   agregarSubtema,
+  descartarSubtemas,
   obtenerSubtemas,
+  guardarExplicaciones,
+  guardarEjercicios,
+  obtenerExplicaciones,
+  obtenerEjercicios,
+  obtenerEjercicioPorId,
+  registrarIntentoEjercicio,
+  obtenerIntentosEjercicio,
+  contarAprendizaje,
   obtenerSesion,
   elegirSiguienteSubtema,
   sondeoCompleto,

@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { crearSesion, agregarSubtema } from "@/lib/db";
-import { extraerSubtemas } from "@/lib/ollama";
+import { extraerSubtemas, generarApunteDeTema } from "@/lib/ollama";
 import { MODELO_PRINCIPAL_POR_DEFECTO } from "@/lib/config";
 import { proveedorDesdeParams } from "@/lib/proveedores";
 import { derivarTema } from "@/lib/texto";
-import type { ProveedorPayload } from "@/lib/tipos";
+import type { NivelSesion, ProveedorPayload } from "@/lib/tipos";
+
+const NIVELES_VALIDOS: NivelSesion[] = ["basico", "intermedio", "avanzado"];
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,19 +16,44 @@ export async function POST(request: NextRequest) {
     const modelo: string = body.modeloPrincipal || MODELO_PRINCIPAL_POR_DEFECTO;
     const proveedor = proveedorDesdeParams((body.proveedor ?? {}) as ProveedorPayload);
 
-    if (!texto || texto.trim().length === 0) {
-      return NextResponse.json(
-        { error: "Falta el campo 'texto'" },
-        { status: 400 }
-      );
+    // Fase C1 — dos modalidades. Sin `modo` se asume "apunte" (compatibilidad con
+    // clientes/scripts viejos: el comportamiento por defecto es el de siempre).
+    const modo: "apunte" | "tema_libre" = body.modo === "tema_libre" ? "tema_libre" : "apunte";
+    const objetivo: string | undefined =
+      typeof body.objetivo === "string" && body.objetivo.trim() ? body.objetivo.trim() : undefined;
+    const nivel: NivelSesion = NIVELES_VALIDOS.includes(body.nivel) ? body.nivel : "intermedio";
+
+    let textoFuente: string;
+    let topic: string;
+    let apunteGenerado: string | null = null;
+
+    if (modo === "tema_libre") {
+      const tema: string | undefined = body.tema;
+      if (!tema || tema.trim().length === 0) {
+        return NextResponse.json({ error: "Falta el campo 'tema'" }, { status: 400 });
+      }
+
+      // El modelo primero escribe el apunte y recién ahí se extraen los sub-temas: de
+      // este modo el resto del flujo (excerpt por sub-tema, preguntas con cita, filtro
+      // anti-alucinación) funciona idéntico al modo apunte, con material de estudio real.
+      const apunte = await generarApunteDeTema(tema, nivel, objetivo, modelo, proveedor);
+      textoFuente = apunte.apunte;
+      apunteGenerado = apunte.apunte;
+      // El título lo elige el modelo (el tema del usuario puede ser "quiero practicar X").
+      topic = topicManual?.trim() || apunte.titulo || derivarTema(apunte.apunte);
+    } else {
+      if (!texto || texto.trim().length === 0) {
+        return NextResponse.json({ error: "Falta el campo 'texto'" }, { status: 400 });
+      }
+      textoFuente = texto;
+      // Antes el topic era texto.slice(0, 50), así que la lista de sesiones mostraba
+      // "# archivo.md\n\n## Challenge: D". Ahora se deriva una frase legible.
+      topic = topicManual?.trim() || derivarTema(texto);
     }
-    // Antes el topic era texto.slice(0, 50), así que la lista de sesiones mostraba
-    // "# archivo.md\n\n## Challenge: D". Ahora se deriva una frase legible.
-    const topic = topicManual?.trim() || derivarTema(texto);
 
     // El modelo elegido en Ajustes ahora sí se usa para extraer los sub-temas: antes se
     // ignoraba y siempre se llamaba al default hardcodeado. Queda guardado en la sesión.
-    const subtemas = await extraerSubtemas(texto, modelo, proveedor);
+    const subtemas = await extraerSubtemas(textoFuente, modelo, proveedor);
 
     if (subtemas.length === 0) {
       return NextResponse.json(
@@ -34,12 +61,16 @@ export async function POST(request: NextRequest) {
         { status: 500 }
       );
     }
-    const sesionId = crearSesion(topic, texto, modelo);
+    const sesionId = crearSesion(topic, textoFuente, modelo, { modo, objetivo, nivel });
     const subtemaIds = subtemas.map((nombre) => agregarSubtema(sesionId, nombre));
 
     return NextResponse.json({
       sesionId,
       topic,
+      modo,
+      // Solo el modo tema libre devuelve el apunte: es material de estudio nuevo que la
+      // landing muestra para revisar antes de arrancar el sondeo.
+      ...(apunteGenerado ? { apunte: apunteGenerado } : {}),
       subtemas: subtemas.map((nombre, i) => ({ id: subtemaIds[i], nombre })),
     });
   } catch (error) {

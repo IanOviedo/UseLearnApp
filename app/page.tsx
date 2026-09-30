@@ -10,6 +10,7 @@ import {
   type ProveedorNube,
 } from "@/lib/proveedores";
 import { MODELO_GEMINI, MODELO_PRINCIPAL_POR_DEFECTO, MODELO_PREGUNTAS_POR_DEFECTO } from "@/lib/config";
+import type { ModoSesion, NivelSesion } from "@/lib/tipos";
 import {
   IconoAdjuntar,
   IconoAjustes,
@@ -23,6 +24,7 @@ import {
   IconoEliminar,
   IconoFlecha,
   IconoHistorial,
+  IconoObjetivo,
   IconoPlay,
 } from "@/components/ui/Iconos";
 
@@ -32,15 +34,15 @@ type EstadoQuiz = "idle" | "generando" | "listo";
 const COPY_POR_ESTADO: Record<EstadoQuiz, { titulo: string; subtitulo: string }> = {
   idle: {
     titulo: "Generá tu quiz",
-    subtitulo: "Pegá o subí tu texto y generá el quiz.",
+    subtitulo: "Pegá tus notas o contá el tema que querés practicar.",
   },
   generando: {
     titulo: "Generando...",
-    subtitulo: "La IA está armando las preguntas.",
+    subtitulo: "La IA está armando el material y las preguntas.",
   },
   listo: {
-    titulo: "¡Quiz listo!",
-    subtitulo: "Ya podés pasar al sondeo.",
+    titulo: "Revisá los sub-temas",
+    subtitulo: "Elegí los que querés cubrir y pasá al sondeo.",
   },
 };
 
@@ -70,6 +72,18 @@ export default function HomePage() {
   const [estadoQuiz, setEstadoQuiz] = useState<EstadoQuiz>("idle");
   const [sesionId, setSesionId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Fase C1 — modalidad de entrada (notas pegadas vs. tema libre) y confirmación de
+  // sub-temas: los detectados se muestran con checkbox antes de entrar al sondeo.
+  const [modo, setModo] = useState<ModoSesion>("apunte");
+  const [temaLibre, setTemaLibre] = useState("");
+  const [nivel, setNivel] = useState<NivelSesion>("intermedio");
+  const [objetivo, setObjetivo] = useState("");
+  const [subtemasGenerados, setSubtemasGenerados] = useState<{ id: number; nombre: string }[]>([]);
+  const [subtemasElegidos, setSubtemasElegidos] = useState<number[]>([]);
+  const [apunteGenerado, setApunteGenerado] = useState<string | null>(null);
+  const [mostrarApunte, setMostrarApunte] = useState(false);
+  const [preparandoSondeo, setPreparandoSondeo] = useState(false);
 
   const [ajustesModalAbierto, setAjustesModalAbierto] = useState(false);
   const [modelosDisponibles, setModelosDisponibles] = useState<ModeloOllama[]>([]);
@@ -168,8 +182,32 @@ export default function HomePage() {
     localStorage.setItem("uselearn:pregen", valor ? "1" : "0");
   }
 
+  /**
+   * Vuelve a "idle" si ya se había creado una sesión: el contenido cambió, así que lo
+   * generado ya no corresponde (la sesión vieja queda en la lista con 0 preguntas, igual
+   * que siempre pasaba cuando se editaba el texto después de "¡Quiz listo!").
+   */
+  function resetSiListo() {
+    if (estadoQuiz === "listo") {
+      setEstadoQuiz("idle");
+      setSesionId(null);
+      setSubtemasGenerados([]);
+      setSubtemasElegidos([]);
+      setApunteGenerado(null);
+      setMostrarApunte(false);
+    }
+  }
+
+  function cambiarModo(nuevo: ModoSesion) {
+    if (nuevo === modo) return;
+    setModo(nuevo);
+    resetSiListo();
+    setError(null);
+  }
+
   async function generarQuiz() {
-    if (!texto.trim()) return;
+    const hayContenido = modo === "apunte" ? texto.trim() : temaLibre.trim();
+    if (!hayContenido) return;
     setEstadoQuiz("generando");
     setError(null);
     try {
@@ -177,7 +215,11 @@ export default function HomePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          texto,
+          // Dos modalidades: "apunte" manda el texto tal cual; "tema_libre" manda el
+          // tema y el server genera el apunte de estudio con el modelo elegido.
+          ...(modo === "tema_libre"
+            ? { modo, tema: temaLibre, nivel, objetivo }
+            : { modo, texto }),
           modeloPrincipal,
           // La config del proveedor viaja en el body: el servidor no puede leer
           // localStorage, así que ahí no hay forma de conseguirlo.
@@ -190,7 +232,11 @@ export default function HomePage() {
         setEstadoQuiz("idle");
         return;
       }
+      const detectados: { id: number; nombre: string }[] = Array.isArray(data.subtemas) ? data.subtemas : [];
       setSesionId(data.sesionId);
+      setSubtemasGenerados(detectados);
+      setSubtemasElegidos(detectados.map((s) => s.id));
+      setApunteGenerado(typeof data.apunte === "string" ? data.apunte : null);
       setEstadoQuiz("listo");
     } catch {
       setError("No se pudo conectar con el servidor.");
@@ -198,17 +244,47 @@ export default function HomePage() {
     }
   }
 
-  function pasarAlSondeo() {
+  function alternarSubtema(id: number) {
+    setSubtemasElegidos((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  async function pasarAlSondeo() {
     if (!sesionId) return;
+
+    if (subtemasElegidos.length === 0) {
+      setError("Elegí al menos un sub-tema.");
+      return;
+    }
+
+    // Confirmación explícita: si se desmarcó algún sub-tema hay que sacarlo de la base
+    // ANTES de entrar al sondeo (todavía no hay respuestas, único caso permitido).
+    const todos = subtemasGenerados.map((s) => s.id);
+    if (subtemasElegidos.length !== todos.length) {
+      setPreparandoSondeo(true);
+      try {
+        const res = await fetch(`/api/sesiones/${sesionId}/subtemas`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mantener: subtemasElegidos }),
+        });
+        const data = await res.json();
+        if (data.error) {
+          setError(data.error);
+          return;
+        }
+      } catch {
+        setError("No se pudieron actualizar los sub-temas.");
+        return;
+      } finally {
+        setPreparandoSondeo(false);
+      }
+    }
     router.push(`/sondeo/${sesionId}`);
   }
 
   function manejarCambioTexto(nuevoTexto: string) {
     setTexto(nuevoTexto);
-    if (estadoQuiz === "listo") {
-      setEstadoQuiz("idle");
-      setSesionId(null);
-    }
+    resetSiListo();
   }
 
   async function manejarArchivo(e: React.ChangeEvent<HTMLInputElement>) {
@@ -278,43 +354,111 @@ export default function HomePage() {
         <div className="grid grid-cols-3 gap-6">
           {/* Textarea */}
           <div className="col-span-2 flex min-h-[320px] flex-col rounded-2xl border border-neutral-800/60 bg-neutral-900/50 p-6 shadow-[0_24px_48px_-24px_rgba(0,0,0,0.85)]">
-            <div className="mb-4 flex items-center gap-2.5">
-              <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-neutral-800 bg-neutral-950/60 text-neutral-400">
-                <IconoDocumento className="h-4 w-4" />
+            <div className="mb-4 flex items-center justify-between gap-2.5">
+              <span className="flex items-center gap-2.5">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-neutral-800 bg-neutral-950/60 text-neutral-400">
+                  {modo === "apunte" ? <IconoDocumento className="h-4 w-4" /> : <IconoObjetivo className="h-4 w-4" />}
+                </span>
+                <span className="text-sm font-medium text-neutral-200">
+                  {modo === "apunte" ? "Pega tus notas o lo que sea..." : "Contá qué querés practicar"}
+                </span>
               </span>
-              <span className="text-sm font-medium text-neutral-200">Pega tus notas o lo que sea...</span>
+              {/* Modalidad de entrada (Fase C1): notas pegadas vs. tema libre */}
+              <div className="flex shrink-0 rounded-full border border-neutral-800 bg-neutral-950/60 p-0.5">
+                <button
+                  onClick={() => cambiarModo("apunte")}
+                  disabled={estadoQuiz === "generando"}
+                  className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs transition-colors duration-200 disabled:opacity-40 ${
+                    modo === "apunte" ? "bg-neutral-800/80 text-neutral-100" : "text-neutral-500 hover:text-neutral-300"
+                  }`}
+                >
+                  <IconoDocumento className="h-3.5 w-3.5" />
+                  Notas
+                </button>
+                <button
+                  onClick={() => cambiarModo("tema_libre")}
+                  disabled={estadoQuiz === "generando"}
+                  className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs transition-colors duration-200 disabled:opacity-40 ${
+                    modo === "tema_libre" ? "bg-neutral-800/80 text-neutral-100" : "text-neutral-500 hover:text-neutral-300"
+                  }`}
+                >
+                  <IconoObjetivo className="h-3.5 w-3.5" />
+                  Tema libre
+                </button>
+              </div>
             </div>
             <textarea
-              value={texto}
-              onChange={(e) => manejarCambioTexto(e.target.value)}
+              value={modo === "apunte" ? texto : temaLibre}
+              onChange={(e) => (modo === "apunte" ? manejarCambioTexto(e.target.value) : setTemaLibre(e.target.value))}
               disabled={estadoQuiz === "generando"}
-              placeholder="Puedes pegar un texto, una pregunta, una imagen o lo que quieras revisar."
+              placeholder={
+                modo === "apunte"
+                  ? "Puedes pegar un texto, una pregunta, una imagen o lo que quieras revisar."
+                  : "Ej: sintaxis y lógica de JavaScript, hooks de React, gramática inglesa..."
+              }
               className="notas-textarea flex-1 resize-none bg-transparent text-sm text-neutral-300 placeholder:text-neutral-600 focus:outline-none disabled:opacity-50"
             />
+            {modo === "tema_libre" && (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <select
+                  value={nivel}
+                  onChange={(e) => {
+                    setNivel(e.target.value as NivelSesion);
+                    resetSiListo();
+                  }}
+                  disabled={estadoQuiz === "generando"}
+                  className="rounded-lg border border-neutral-800 bg-neutral-950/60 px-2.5 py-1.5 text-xs text-neutral-300 transition-colors focus:border-neutral-600 focus:outline-none disabled:opacity-50"
+                >
+                  <option value="basico">Nivel básico</option>
+                  <option value="intermedio">Nivel intermedio</option>
+                  <option value="avanzado">Nivel avanzado</option>
+                </select>
+                <input
+                  value={objetivo}
+                  onChange={(e) => {
+                    setObjetivo(e.target.value);
+                    resetSiListo();
+                  }}
+                  disabled={estadoQuiz === "generando"}
+                  placeholder="Objetivo (opcional): ej. aprobar un examen"
+                  className="min-w-0 flex-1 rounded-lg border border-neutral-800 bg-neutral-950/60 px-2.5 py-1.5 text-xs text-neutral-300 placeholder:text-neutral-600 transition-colors focus:border-neutral-600 focus:outline-none disabled:opacity-50"
+                />
+              </div>
+            )}
             <div className="mt-4 flex items-center gap-2 self-start">
               <button
-                onClick={() => setTexto("")}
+                onClick={() => {
+                  if (modo === "apunte") {
+                    manejarCambioTexto("");
+                  } else {
+                    setTemaLibre("");
+                    resetSiListo();
+                  }
+                }}
                 disabled={estadoQuiz === "generando"}
                 className="flex items-center gap-2 rounded-full border border-neutral-800 px-4 py-1.5 text-sm text-neutral-400 transition-colors duration-200 hover:border-neutral-600 hover:bg-neutral-800/40 hover:text-neutral-100 disabled:opacity-40"
               >
                 <IconoEliminar className="h-3.5 w-3.5" />
-                Limpiar texto
+                {modo === "apunte" ? "Limpiar texto" : "Limpiar tema"}
               </button>
-              <label
-                title="Adjuntar archivo (.txt, .md, .pdf)"
-                className={`flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border border-neutral-800 text-neutral-400 transition-colors duration-200 hover:border-neutral-600 hover:bg-neutral-800/40 hover:text-neutral-100 ${
-                  subiendoArchivo || estadoQuiz === "generando" ? "pointer-events-none opacity-40" : ""
-                }`}
-              >
-                <IconoAdjuntar className="h-4 w-4" />
-                <input
-                  type="file"
-                  accept=".txt,.md,.pdf"
-                  onChange={manejarArchivo}
-                  className="hidden"
-                  disabled={subiendoArchivo || estadoQuiz === "generando"}
-                />
-              </label>
+              {/* Adjuntar solo en modo Notas: el modo tema libre no tiene texto propio. */}
+              {modo === "apunte" && (
+                <label
+                  title="Adjuntar archivo (.txt, .md, .pdf)"
+                  className={`flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border border-neutral-800 text-neutral-400 transition-colors duration-200 hover:border-neutral-600 hover:bg-neutral-800/40 hover:text-neutral-100 ${
+                    subiendoArchivo || estadoQuiz === "generando" ? "pointer-events-none opacity-40" : ""
+                  }`}
+                >
+                  <IconoAdjuntar className="h-4 w-4" />
+                  <input
+                    type="file"
+                    accept=".txt,.md,.pdf"
+                    onChange={manejarArchivo}
+                    className="hidden"
+                    disabled={subiendoArchivo || estadoQuiz === "generando"}
+                  />
+                </label>
+              )}
               {subiendoArchivo && (
                 <span className="text-xs text-neutral-500">Leyendo archivo...</span>
               )}
@@ -329,13 +473,72 @@ export default function HomePage() {
               </span>
               <span className="text-sm font-semibold text-neutral-100">{COPY_POR_ESTADO[estadoQuiz].titulo}</span>
             </div>
-            <p className="mb-6 text-sm text-neutral-500">{COPY_POR_ESTADO[estadoQuiz].subtitulo}</p>
+            <p className="mb-4 text-sm text-neutral-500">{COPY_POR_ESTADO[estadoQuiz].subtitulo}</p>
+
+            {/* Fase C1 — confirmación de sub-temas: se pueden desmarcar antes de entrar. */}
+            {estadoQuiz === "listo" && subtemasGenerados.length > 0 && (
+              <div className="mb-4 rounded-xl border border-neutral-800/70 bg-neutral-950/40 p-3">
+                <p className="mb-2 flex items-center justify-between text-xs uppercase tracking-wider text-neutral-500">
+                  <span>Sub-temas detectados</span>
+                  <span className="tabular-nums text-neutral-400">
+                    {subtemasElegidos.length}/{subtemasGenerados.length}
+                  </span>
+                </p>
+                <ul className="flex max-h-44 flex-col gap-1 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-neutral-700">
+                  {subtemasGenerados.map((s) => {
+                    const activo = subtemasElegidos.includes(s.id);
+                    return (
+                      <li key={s.id}>
+                        <label className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm transition-colors duration-150 hover:bg-neutral-900/70">
+                          <input
+                            type="checkbox"
+                            checked={activo}
+                            onChange={() => alternarSubtema(s.id)}
+                            disabled={preparandoSondeo}
+                            className="h-3.5 w-3.5 shrink-0 accent-neutral-200"
+                          />
+                          <span className={activo ? "text-neutral-200" : "text-neutral-600 line-through"}>
+                            {s.nombre}
+                          </span>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {apunteGenerado && (
+                  <div className="mt-2 border-t border-neutral-800/70 pt-2">
+                    <button
+                      onClick={() => setMostrarApunte((v) => !v)}
+                      className="flex items-center gap-1.5 text-xs text-neutral-500 transition-colors duration-150 hover:text-neutral-300"
+                    >
+                      <IconoChevron
+                        className={`h-3.5 w-3.5 transition-transform duration-200 ${mostrarApunte ? "rotate-180" : ""}`}
+                      />
+                      {mostrarApunte ? "Ocultar apunte generado" : "Ver apunte generado"}
+                    </button>
+                    {mostrarApunte && (
+                      <p className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-neutral-500">
+                        {apunteGenerado}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            {estadoQuiz === "listo" && subtemasElegidos.length === 0 && (
+              <p className="mb-3 text-xs text-amber-400">Elegí al menos un sub-tema para continuar.</p>
+            )}
 
             <button
               onClick={estadoQuiz === "listo" ? pasarAlSondeo : generarQuiz}
-              disabled={!texto.trim() || estadoQuiz === "generando"}
+              disabled={
+                preparandoSondeo ||
+                estadoQuiz === "generando" ||
+                (modo === "apunte" ? !texto.trim() : !temaLibre.trim()) ||
+                (estadoQuiz === "listo" && subtemasElegidos.length === 0)
+              }
               className={`flex items-center justify-between gap-3 rounded-full px-5 py-3 text-sm font-medium transition-all duration-300 ${
-                estadoQuiz === "generando"
+                estadoQuiz === "generando" || preparandoSondeo
                   ? "cursor-not-allowed bg-neutral-800/60 text-neutral-500"
                   : "bg-neutral-100 text-neutral-900 hover:bg-white hover:shadow-lg hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:translate-y-0 disabled:hover:shadow-none"
               }`}
@@ -347,7 +550,13 @@ export default function HomePage() {
                     Generando quiz...
                   </>
                 )}
-                {estadoQuiz === "listo" && (
+                {preparandoSondeo && (
+                  <>
+                    <IconoCargador className="h-4 w-4" />
+                    Preparando sondeo...
+                  </>
+                )}
+                {estadoQuiz === "listo" && !preparandoSondeo && (
                   <>
                     <IconoPlay className="h-4 w-4" />
                     Pasar al sondeo
@@ -360,7 +569,7 @@ export default function HomePage() {
                   </>
                 )}
               </span>
-              {estadoQuiz !== "generando" && <IconoFlecha className="h-4 w-4 shrink-0" />}
+              {estadoQuiz !== "generando" && !preparandoSondeo && <IconoFlecha className="h-4 w-4 shrink-0" />}
             </button>
 
             {error && (

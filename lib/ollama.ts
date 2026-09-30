@@ -5,6 +5,7 @@ import {
   MODELO_NUBE_POR_DEFECTO,
   MODELO_PREGUNTAS_POR_DEFECTO,
   MODELO_PRINCIPAL_POR_DEFECTO,
+  NUM_PREDICT_APUNTE,
   NUM_PREDICT_FEEDBACK,
   NUM_PREDICT_LOTE,
   NUM_PREDICT_SUBTEMAS,
@@ -27,7 +28,7 @@ import { extraerExcerpt, headPorParrafo } from "./texto"
 // veces. Además `generarFeedbackSondeo` y `extraerSubtemas` llamaban a Ollama directo,
 // por lo que el selector de modelo de la pantalla de Ajustes no las afectaba.
 
-interface OpcionesModelo {
+export interface OpcionesModelo {
   prompt: string;
   modelo: string;
   proveedor?: ProveedorNube;
@@ -178,7 +179,7 @@ async function llamarGeminiNativo(prompt: string, proveedor?: ProveedorNube): Pr
  * Prioridad: proveedor explícito (viene del cliente en cada request, porque el server
  * no puede leer localStorage) → nombre de modelo que empieza con "gemini" → Ollama local.
  */
-async function llamarModelo({ prompt, modelo, proveedor, esperaObjeto = false, numPredict, esquema }: OpcionesModelo): Promise<string> {
+export async function llamarModelo({ prompt, modelo, proveedor, esperaObjeto = false, numPredict, esquema }: OpcionesModelo): Promise<string> {
   if (proveedor) {
     return proveedor.formato === "gemini-nativo"
       ? llamarGeminiNativo(prompt, proveedor)
@@ -198,7 +199,7 @@ function limpiarOpcion(texto: string): string {
   return texto.replace(/^(opci[oó]n\s*)?[a-d][.):]\s*/i, "").trim()
 }
 
-function sinBloquesDeCodigo(rawText: string): string {
+export function sinBloquesDeCodigo(rawText: string): string {
   return rawText
     .trim()
     .replace(/^```(?:json)?\s*/i, "")
@@ -207,7 +208,7 @@ function sinBloquesDeCodigo(rawText: string): string {
 }
 
 /** Se queda solo con lo que hay entre el primer y el último par de delimitadores. */
-function recortarEntre(texto: string, apertura: string, cierre: string): string {
+export function recortarEntre(texto: string, apertura: string, cierre: string): string {
   const desde = texto.indexOf(apertura)
   const hasta = texto.lastIndexOf(cierre)
   return desde !== -1 && hasta !== -1 && hasta > desde ? texto.slice(desde, hasta + 1) : texto
@@ -376,6 +377,84 @@ export async function extraerSubtemas(
       `Failed to parse model response as JSON: ${error instanceof Error ? error.message : String(error)}`
     )
   }
+}
+
+// --- Fase C1: apunte sintético (modalidad "tema libre") ----------------------
+
+/** Apunte generado por el modelo: es el `texto_original` de la sesión. */
+export interface ApunteGenerado {
+  titulo: string;
+  apunte: string;
+}
+
+/** Esquema JSON del apunte: Ollama rellena campos, no improvisa el formato. */
+const ESQUEMA_APUNTE = {
+  type: "object",
+  properties: {
+    titulo: { type: "string" },
+    apunte: { type: "string" },
+  },
+  required: ["titulo", "apunte"],
+} as Record<string, unknown>;
+
+export function construirPromptApunteTema(tema: string, nivel: string, objetivo?: string): string {
+  const objetivoLinea = objetivo?.trim() ? `\nOBJETIVO DEL ESTUDIANTE: ${objetivo.trim()}\n` : "";
+  return `TEMA: ${tema.trim()}
+NIVEL: ${nivel}${objetivoLinea}
+TAREA: Escribí un apunte de estudio en español sobre el TEMA. Va a ser la fuente ÚNICA de un quiz de diagnóstico (si algo no está en el apunte, no se va a poder preguntar), así que tiene que cubrir el tema por completo.
+Reglas:
+- Autocontenido: definiciones claras, diferencias entre conceptos, ejemplos concretos y errores típicos.
+- Ajustá la profundidad al NIVEL y, si hay OBJETIVO, orientá el apunte hacia eso.
+- Entre 8 y 12 párrafos (unas 800-1100 palabras), separados por una línea en blanco.
+- Texto plano: sin markdown, sin #, sin asteriscos, sin listas con guiones.
+- No menciones que sos una IA ni que esto es un texto generado.
+Respondé SOLO con un objeto JSON con dos campos: "titulo" (4 a 8 palabras en español) y "apunte" (el texto completo).`;
+}
+
+/**
+ * Parsea la respuesta del apunte. Con esquema el JSON de Ollama sale válido, pero los
+ * proveedores de nube y Gemini no reciben el esquema y devuelven prosa: en ese caso se
+ * usa el texto tal cual (el título queda en el tema pedido) en vez de romper la creación.
+ */
+function parsearApunte(rawText: string, tema: string): ApunteGenerado {
+  const limpio = recortarEntre(sinBloquesDeCodigo(rawText), "{", "}")
+
+  try {
+    const parsed = JSON.parse(limpio) as { titulo?: unknown; apunte?: unknown }
+    if (typeof parsed.titulo === "string" && typeof parsed.apunte === "string" && parsed.apunte.trim().length > 0) {
+      return { titulo: parsed.titulo.trim(), apunte: parsed.apunte.trim() }
+    }
+    // JSON legible pero con otra forma: es un error del modelo, no prosa.
+    throw new Error(`Estructura de apunte inválida: ${limpio.slice(0, 200)}`)
+  } catch (error) {
+    const prosa = limpio.trim()
+    if (prosa.length > 0 && !(error instanceof SyntaxError)) throw error
+    if (prosa.length > 0) return { titulo: tema.trim(), apunte: prosa }
+    throw new Error("El modelo no devolvió un apunte legible")
+  }
+}
+
+/**
+ * Fase C1 — genera el apunte de estudio de la modalidad "tema libre". El apunte se guarda
+ * como `texto_original` y de ahí en adelante el pipeline es idéntico al modo apunte
+ * (sub-temas, excerpts, preguntas con cita), así que la modalidad nueva no duplica nada.
+ */
+export async function generarApunteDeTema(
+  tema: string,
+  nivel: string = "intermedio",
+  objetivo?: string,
+  modelo: string = MODELO_PRINCIPAL_POR_DEFECTO,
+  proveedor?: ProveedorNube
+): Promise<ApunteGenerado> {
+  const prompt = construirPromptApunteTema(tema, nivel, objetivo)
+  const rawText = await llamarModelo({
+    prompt,
+    modelo,
+    proveedor,
+    numPredict: NUM_PREDICT_APUNTE,
+    esquema: ESQUEMA_APUNTE,
+  })
+  return parsearApunte(rawText, tema)
 }
 
 export async function generarPregunta(
