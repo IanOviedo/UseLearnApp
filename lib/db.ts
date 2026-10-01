@@ -156,6 +156,23 @@ db.exec(`CREATE TABLE IF NOT EXISTS reportes_pregunta (
 // "no lo vi" de "lo vi y lo salteé". El dominio NO se toca: saltar no aprueba nada.
 asegurarColumna("subtemas", "saltado", "INTEGER NOT NULL DEFAULT 0");
 
+// --- Feedback de calidad de ejercicios (ítem 15, fase Enseñar) ---------------
+// Misma idea que `reportes_pregunta` pero sobre la fase de práctica: el enunciado no dice qué
+// hay que hacer, la solución no funciona, o el ejercicio repite uno de otro sub-tema.
+//
+// Se guardan aparte a propósito: el juez semántico de §14 evalúa preguntas del SONDEO, no
+// ejercicios de código (que se verifican ejecutando). Meterlos en la misma tabla haría que la
+// calibración del juez mezclara dos cosas que se miden distinto.
+db.exec(`CREATE TABLE IF NOT EXISTS reportes_ejercicio (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sesion_id INTEGER NOT NULL REFERENCES sesiones(id),
+  subtema_id INTEGER NOT NULL REFERENCES subtemas(id),
+  ejercicio_id INTEGER NOT NULL REFERENCES ejercicios(id),
+  motivo TEXT NOT NULL,
+  contenido TEXT NOT NULL,
+  creada_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+)`);
+
 db.exec("CREATE INDEX IF NOT EXISTS idx_preguntas_subtema ON preguntas(subtema_id, respondida)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_preguntas_sesion ON preguntas(sesion_id, descartada)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_subtemas_sesion ON subtemas(sesion_id)");
@@ -295,12 +312,139 @@ function listarSesionesConEstado(): {
   });
 }
 
+// --- Reportes de ejercicios malos (fase Enseñar/Practicar) --------------------
+
+/**
+ * Motivos de un ejercicio malo. Son distintos de los de las preguntas del sondeo porque los
+ * defectos son otros: acá no se "¿está bien la respuesta marcada?" sino "¿sé qué me piden hacer
+ * y la solución anda?".
+ */
+export const MOTIVOS_EJERCICIO_MALA = [
+  "no_se_entiende",
+  "no_dice_que_hay_que_hacer",
+  "la_solucion_no_funciona",
+  "las_assertions_estan_mal",
+  "repetido",
+  "nada_que_ver_con_el_tema",
+  "muy_dificil",
+  "otra",
+] as const;
+
+export type MotivoEjercicioMalo = (typeof MOTIVOS_EJERCICIO_MALA)[number];
+
+const ES_MOTIVO_EJERCICIO_VALIDO = new Set<string>(MOTIVOS_EJERCICIO_MALA);
+
+export interface ResultadoReporteEjercicio {
+  ok: boolean;
+  yaReportado: boolean;
+  subtemaId?: number;
+  motivo?: string;
+}
+
+/**
+ * Marca un ejercicio como malo y guarda el reporte.
+ *
+ * **No borra el ejercicio ni lo descarta del material.** A diferencia de la pregunta del sondeo
+ * (que se descarta para que deje de servirse), acá el ejercicio ya se generó y está cacheado: si se
+ * lo sacara, el usuario perdería la práctica de golpe a mitad de la sesión. Se marca el reporte y
+ * el ejercicio queda visible, que además es lo que hace falta para poder reproducir el problema:
+ * un ejercicio que "no funciona" solo sirve si se puede volver a abrir.
+ *
+ * Idempotente: reportar dos veces no duplica.
+ */
+const reportarEjercicioMalo = db.transaction(
+  (ejercicioId: number, motivo: string): ResultadoReporteEjercicio => {
+    const ejercicio = db
+      .prepare("SELECT id, sesion_id, subtema_id FROM ejercicios WHERE id = ?")
+      .get(ejercicioId) as
+      | { id: number; sesion_id: number; subtema_id: number }
+      | undefined;
+
+    if (!ejercicio) throw new Error(`El ejercicio ${ejercicioId} no existe`);
+    if (!ES_MOTIVO_EJERCICIO_VALIDO.has(motivo)) {
+      throw new Error(
+        `Motivo inválido: "${motivo}". Usar uno de: ${MOTIVOS_EJERCICIO_MALA.join(", ")}`
+      );
+    }
+
+    const previa = db
+      .prepare("SELECT id FROM reportes_ejercicio WHERE ejercicio_id = ?")
+      .get(ejercicioId) as { id: number } | undefined;
+
+    if (previa) {
+      return { ok: true, yaReportado: true, subtemaId: ejercicio.subtema_id, motivo };
+    }
+
+    // Se guarda el JSON completo del ejercicio: sin el, el reporte no sirve para depurar,
+    // porque el material se regenera y cambia entre corridas.
+    const contenido = db
+      .prepare("SELECT * FROM ejercicios WHERE id = ?")
+      .get(ejercicioId) as Record<string, unknown>;
+    for (const campo of ["assertions", "opciones"] as const) {
+      const bruto = contenido[campo];
+      if (typeof bruto === "string") {
+        try {
+          contenido[campo] = JSON.parse(bruto);
+        } catch {
+          contenido[campo] = bruto;
+        }
+      }
+    }
+
+    db.prepare(
+      "INSERT INTO reportes_ejercicio (sesion_id, subtema_id, ejercicio_id, motivo, contenido) VALUES (?, ?, ?, ?, ?)"
+    ).run(
+      ejercicio.sesion_id,
+      ejercicio.subtema_id,
+      ejercicioId,
+      motivo,
+      JSON.stringify(contenido)
+    );
+
+    return { ok: true, yaReportado: false, subtemaId: ejercicio.subtema_id, motivo };
+  }
+);
+
+/** Reportes de ejercicios de una sesión, para revisarlos y para alimentar el golden set. */
+function obtenerReportesEjercicio(sesionId: number): {
+  id: number;
+  ejercicioId: number;
+  subtemaId: number;
+  motivo: string;
+  contenido: string;
+  creadaEn: string;
+}[] {
+  const filas = db
+    .prepare(
+      `SELECT id, ejercicio_id, subtema_id, motivo, contenido, creada_en
+         FROM reportes_ejercicio WHERE sesion_id = ? ORDER BY id`
+    )
+    .all(sesionId) as {
+    id: number;
+    ejercicio_id: number;
+    subtema_id: number;
+    motivo: string;
+    contenido: string;
+    creada_en: string;
+  }[];
+
+  return filas.map((f) => ({
+    id: f.id,
+    ejercicioId: f.ejercicio_id,
+    subtemaId: f.subtema_id,
+    motivo: f.motivo,
+    contenido: f.contenido,
+    creadaEn: f.creada_en,
+  }));
+}
+
 const eliminarSesion = db.transaction((sesionId: number): void => {
   // Orden por FKs: intentos → ejercicios → explicaciones → reportes → respuestas → preguntas →
   // subtemas → sesiones. Con foreign_keys = ON, borrar en otro orden tira un error.
   db.prepare(
     "DELETE FROM intentos_ejercicio WHERE ejercicio_id IN (SELECT id FROM ejercicios WHERE sesion_id = ?)"
   ).run(sesionId);
+  db.prepare("DELETE FROM reportes_ejercicio WHERE sesion_id = ?").run(sesionId);
   db.prepare("DELETE FROM ejercicios WHERE sesion_id = ?").run(sesionId);
   db.prepare("DELETE FROM explicaciones WHERE sesion_id = ?").run(sesionId);
   db.prepare("DELETE FROM reportes_pregunta WHERE sesion_id = ?").run(sesionId);
@@ -1170,6 +1314,8 @@ export {
   registrarRespuesta,
   reportarPreguntaMala,
   obtenerReportes,
+  reportarEjercicioMalo,
+  obtenerReportesEjercicio,
   obtenerErroresSesion,
   obtenerHistorialSesion,
   contarProgresoSesion,

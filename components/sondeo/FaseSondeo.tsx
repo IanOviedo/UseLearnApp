@@ -207,13 +207,23 @@ export default function FaseSondeo({
   const [progreso, setProgreso] = useState<ProgresoSondeo>(PROGRESO_INICIAL);
   const [subtemasDebiles, setSubtemasDebiles] = useState<string[]>([]);
   const [subtemasSinDominar, setSubtemasSinDominar] = useState<string[]>([]);
-  // Ítem 15 — "esta pregunta está mal". `motivoAbierto` es qué pregunta está con el menú
-  // desplegado (null = cerrado). El aviso de confirmación se maneja aparte porque la pregunta
-  // desaparece al instante: sin él, el click parece no haber hecho nada.
-  // `reporteEnviado` es un contador, no un flag, para que dos reportes seguidos del mismo motivo
-  // se vean igual (si fuera booleano, el segundo click no cambiaría el estado y no se rerenderiza).
+  // Ítem 15 — "esta pregunta está mal".
+  //
+  // `reporteConfirmado` guarda el id de la pregunta ACABADA de reportar, no un contador. Con un
+  // contador el estado quedaba en "1" para siempre y todas las preguntas siguientes mostraban
+  // "Gracias, la descartamos" en vez del botón: el botón desaparecía después del primer reporte.
+  // Con un id, el mensaje es de ESA pregunta y la siguiente muestra el botón otra vez.
   const [motivoAbierto, setMotivoAbierto] = useState<number | null>(null);
-  const [reporteEnviado, setReporteEnviado] = useState(0);
+  /**
+   * Mensaje de confirmación del reporte, independiente de la pregunta activa.
+   *
+   * Antes iba pegado a la pregunta ("Gracias, la descartamos") y, cuando la pregunta reportada se
+   * sacaba del historial, `indiceActiva` dejaba de apuntar a ella y el mensaje no se veía nunca.
+   * Además el estado era global: una vez reportado, TODAS las preguntas siguientes mostraban la
+   * confirmación en vez del botón, que es lo que hacía desaparecer el botón.
+   * Ahora es un aviso flotante con vida propia: aparece, y el botón vuelve en la pregunta siguiente.
+   */
+  const [reporteMensaje, setReporteMensaje] = useState<string | null>(null);
   const [reportando, setReportando] = useState(false);
 
   const finRef = useRef<HTMLDivElement>(null);
@@ -475,7 +485,14 @@ export default function FaseSondeo({
     if (!item || reportando) return;
     setReportando(true);
     setMotivoAbierto(null);
-    setReporteEnviado((n) => n + 1);
+
+    // La pregunta reportada sale del HISTORIAL, no solo de la caché. Si se dejaba, `indiceActiva`
+    // seguía apuntando a ella y la pantalla se quedaba mostrando una pregunta que ya no existe,
+    // con el mensaje de confirmación pegado encima. También sale de `vistas` para que, si el
+    // servidor la volviera a servir, el cliente no la ignorara por estar "ya vista".
+    setHistorial((prev) => prev.filter((p) => p.preguntaId !== item.preguntaId));
+    vistasRef.current.delete(item.preguntaId);
+    cacheRef.current = cacheRef.current.filter((c) => c.preguntaId !== item.preguntaId);
 
     const config = leerConfigLocal();
     try {
@@ -497,13 +514,12 @@ export default function FaseSondeo({
 
       if (!data.ok) {
         setError(data.error ?? "No se pudo marcar la pregunta");
-        setReporteEnviado(0);
         return;
       }
 
-      // La pregunta reportada no se cuenta como respondida ni toca el desempeño del sub-tema, así
-      // que el historial se deja como está y solo hay que sacar el ítem de la caché del lote.
-      cacheRef.current = cacheRef.current.filter((c) => c.preguntaId !== item.preguntaId);
+      // Confirmación con vida corta: el aviso se va solo y el botón queda disponible de nuevo.
+      setReporteMensaje(data.yaReportada ? "Ya la habías marcado." : "Gracias, la descartamos.");
+      window.setTimeout(() => setReporteMensaje(null), 2600);
 
       if (data.siguiente) {
         procesarPayload(data.siguiente);
@@ -513,7 +529,6 @@ export default function FaseSondeo({
       }
     } catch {
       setError("No se pudo marcar la pregunta");
-      setReporteEnviado(0);
     } finally {
       setReportando(false);
     }
@@ -701,15 +716,19 @@ export default function FaseSondeo({
               </div>
             )}
 
-            {/* Ítem 15 — "esta pregunta está mal". Va debajo de la explicación, que es cuando
-                el usuario ya tiene la información para juzgar si la pregunta era justa. */}
+            {/* Ítem 15 — "esta pregunta está mal". Disponible en TODAS las preguntas, respondidas
+                o no: si el enunciado o las opciones están mal, el usuario lo ve antes de elegir,
+                y si es la explicación la ve después de leerla. El aviso de confirmación va
+                arriba porque la pregunta reportada sale de la pantalla al instante. */}
+            {reporteMensaje && (
+              <div className="mb-3 flex items-center justify-center gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.06] px-4 py-2.5">
+                <IconoCheck className="h-3.5 w-3.5 text-emerald-400/80" />
+                <span className="text-[12px] text-emerald-200/90">{reporteMensaje}</span>
+              </div>
+            )}
+
             <div className="mt-4">
-              {reporteEnviado > 0 ? (
-                <p className="flex items-center justify-center gap-1.5 text-[11px] text-neutral-500">
-                  <IconoCheck className="h-3 w-3 text-emerald-500/70" />
-                  Gracias, la descartamos.
-                </p>
-              ) : motivoAbierto === indiceActiva ? (
+              {motivoAbierto === indiceActiva ? (
                 <div className="rounded-xl border border-neutral-800/60 bg-neutral-900/40 p-2">
                   <p className="px-2 pb-1.5 text-[11px] text-neutral-500">¿Qué está mal?</p>
                   <div className="flex flex-wrap gap-1">

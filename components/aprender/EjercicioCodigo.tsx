@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { IconoAlerta, IconoCargador, IconoCheck, IconoDestello, IconoEquis, IconoPlay } from "@/components/ui/Iconos";
 import RunnerSandbox, { type ResultadoRunner, type SandboxHandle } from "./RunnerSandbox";
+import BotonReportarEjercicio from "./BotonReportarEjercicio";
 import type { Ejercicio, IntentoEjercicio } from "@/lib/tipos";
 
 // CodeMirror necesita `document` al construirse: se carga solo en el cliente (la doc de
@@ -228,6 +229,10 @@ export default function EjercicioCodigo({ ejercicio, ultimoIntento, onAprobado }
           No se pudo guardar el intento. El código quedó en pantalla: probá de nuevo.
         </p>
       )}
+
+      {/* "Este ejercicio está mal": vive dentro de la card para que quede pegado al ejercicio que
+          se está reportando, no a la pantalla. Ver components/aprender/BotonReportarEjercicio.tsx. */}
+      <BotonReportarEjercicio ejercicioId={ejercicio.id} />
     </div>
   );
 }

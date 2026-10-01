@@ -232,6 +232,93 @@ describe("marcarSubtemaSaltado", () => {
   });
 });
 
+describe("reportarEjercicioMalo (ítem 15, fase Enseñar)", () => {
+  it("guarda el reporte con el motivo y una copia completa del ejercicio", () => {
+    const id = ejercicioEn(SESION, SUBTEMA, "ejercicio para reportar");
+    expect(db.reportarEjercicioMalo(id, "no_se_entiende").ok).toBe(true);
+
+    const [reporte] = db.obtenerReportesEjercicio(SESION);
+    expect(reporte.motivo).toBe("no_se_entiende");
+    expect(reporte.ejercicioId).toBe(id);
+    // El contenido tiene que venir con assertions parseadas, no como string: sin eso el
+    // reporte no sirve para depurar por qué el ejercicio "no funciona".
+    const contenido = JSON.parse(reporte.contenido);
+    expect(typeof contenido.enunciado).toBe("string");
+    expect(Array.isArray(contenido.assertions)).toBe(true);
+  });
+
+  it("NO descarta ni borra el ejercicio: se puede volver a abrir para reproducirlo", () => {
+    // Decisión clave y contraintuitiva: en el sondeo la pregunta mala sí se descarta, pero acá no.
+    // El material de Enseñar está cacheado por sub-tema: sacarlo a mitad de sesión le quitaría
+    // al usuario la práctica, y un reporte de "la solución no funciona" solo sirve si después
+    // se puede volver a abrir el ejercicio.
+    const id = ejercicioEn(SESION, SUBTEMA, "ejercicio con la solución rota");
+    db.reportarEjercicioMalo(id, "la_solucion_no_funciona");
+    expect(db.obtenerEjercicios(SESION, SUBTEMA).some((e) => e.id === id)).toBe(true);
+  });
+
+  it("NO registra un intento ni toca el conteo de aprobados", () => {
+    const id = ejercicioEn(SESION, SUBTEMA, "ejercicio sin intentar");
+    const antes = db.contarAprendizaje(SESION).find((c) => c.subtemaId === SUBTEMA);
+    db.reportarEjercicioMalo(id, "muy_dificil");
+    const despues = db.contarAprendizaje(SESION).find((c) => c.subtemaId === SUBTEMA);
+    expect(despues?.ejerciciosAprobados).toBe(antes?.ejerciciosAprobados);
+    expect(db.obtenerIntentosEjercicio(id)).toHaveLength(0);
+  });
+
+  it("es idempotente: reportar dos veces no duplica", () => {
+    const id = ejercicioEn(SESION, SUBTEMA, "ejercicio reportado dos veces");
+    db.reportarEjercicioMalo(id, "otra");
+    const segundo = db.reportarEjercicioMalo(id, "no_se_entiende");
+    expect(segundo.yaReportado).toBe(true);
+    expect(db.obtenerReportesEjercicio(SESION)).toHaveLength(1);
+    // El primer motivo es el que vale: es el que el usuario eligió antes de ver el resultado.
+    expect(db.obtenerReportesEjercicio(SESION)[0].motivo).toBe("otra");
+  });
+
+  it("rechaza un motivo fuera de la lista cerrada", () => {
+    const id = ejercicioEn(SESION, SUBTEMA, "ejercicio con motivo inválido");
+    expect(() => db.reportarEjercicioMalo(id, "porque sí")).toThrow(/Motivo inválido/);
+    expect(db.obtenerReportesEjercicio(SESION)).toEqual([]);
+  });
+
+  it("acepta todos los motivos de la lista", () => {
+    for (const motivo of db.MOTIVOS_EJERCICIO_MALA) {
+      const id = ejercicioEn(SESION, SUBTEMA, `ejercicio motivo ${motivo}`);
+      expect(db.reportarEjercicioMalo(id, motivo).ok).toBe(true);
+    }
+    expect(db.obtenerReportesEjercicio(SESION)).toHaveLength(db.MOTIVOS_EJERCICIO_MALA.length);
+  });
+
+  it("tira si el ejercicio no existe", () => {
+    expect(() => db.reportarEjercicioMalo(999999, "otra")).toThrow(/no existe/);
+  });
+
+  it("eliminar la sesión borra también los reportes de ejercicios (orden de FKs)", () => {
+    const id = db.crearSesion("para borrar ejercicios", "texto", "gemma3:4b");
+    const sub = db.agregarSubtema(id, "Sub");
+    db.reportarEjercicioMalo(ejercicioEn(id, sub, "uno"), "otra");
+    expect(db.obtenerReportesEjercicio(id)).toHaveLength(1);
+
+    db.eliminarSesion(id);
+    expect(db.obtenerReportesEjercicio(id)).toEqual([]);
+  });
+
+  it("los reportes de ejercicio NO se mezclan con los de pregunta", () => {
+    // Son tablas distintas a propósito: el juez semántico de §14 evalúa preguntas del sondeo, no
+    // ejercicios de código. Si compartieran tabla, la calibración mezclaría dos cosas distintas.
+    const idEjercicio = ejercicioEn(SESION, SUBTEMA, "para el contraste");
+    const idPregunta = pregunta(SUBTEMA, "uno");
+    db.reportarEjercicioMalo(idEjercicio, "otra");
+    db.reportarPreguntaMala(idPregunta, "otra");
+
+    expect(db.obtenerReportesEjercicio(SESION)).toHaveLength(1);
+    expect(db.obtenerReportes(SESION)).toHaveLength(1);
+    expect(db.obtenerReportes(SESION)[0].preguntaId).toBe(idPregunta);
+    expect(db.obtenerReportesEjercicio(SESION)[0].ejercicioId).toBe(idEjercicio);
+  });
+});
+
 describe("reportarPreguntaMala (ítem 15)", () => {
   // El server la llama `reportarPreguntaMala`, y estos tests usan el mismo nombre para que un
   // grep por uno encuentre el otro.

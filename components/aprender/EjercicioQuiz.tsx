@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { IconoCheck, IconoDestello, IconoEquis, IconoObjetivo } from "@/components/ui/Iconos";
+import BotonReportarEjercicio from "./BotonReportarEjercicio";
 import type { Ejercicio, IntentoEjercicio } from "@/lib/tipos";
 
 // Fase D — ejercicio conceptual. La corrección SIEMPRE la hace el server contra
@@ -125,6 +126,10 @@ export default function EjercicioQuiz({ ejercicio, ultimoIntento, onAprobado }: 
       )}
 
       {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
+
+      {/* "Este ejercicio está mal": mismo botón que en los ejercicios de código. Va dentro de la
+          card para que el reporte quede asociado al ejercicio, no a la pantalla. */}
+      <BotonReportarEjercicio ejercicioId={ejercicio.id} />
     </div>
   );
 }
