@@ -1,0 +1,190 @@
+// Tests de las reglas de dominio: son las que deciden si un sub-tema queda "cubierto", y un
+// error acá no rompe la pantalla: cambia en silencio cuántos conceptos se marcan dominados.
+// Corren contra una base temporal propia (USELEARN_DB), así que la real no se toca.
+import { describe, it, expect, beforeEach, afterAll } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+// `lib/db.ts` abre la base al importarse, así que la variable tiene que estar puesta ANTES del
+// import (los imports se suben, por eso se usa import dinámico arriba del nivel de módulo).
+const DB_TEMP = path.join(os.tmpdir(), `uselearn-test-${process.pid}.db`);
+for (const sufijo of ["", "-wal", "-shm"]) fs.rmSync(DB_TEMP + sufijo, { force: true });
+process.env.USELEARN_DB = DB_TEMP;
+
+const db = await import("@/lib/db");
+
+let SESION = 0;
+let SUBTEMA = 0;
+
+/** Guarda una pregunta de opción múltiple: la correcta va siempre en el índice 0. */
+function preguntaEn(sesionId: number, subtemaId: number, correcta: string): number {
+  const opciones = [correcta, "distractor uno", "distractor dos", "distractor tres"];
+  const [id] = db.guardarLotePreguntas(
+    sesionId,
+    subtemaId,
+    "sondeo",
+    [JSON.stringify({ pregunta: `pregunta sobre ${correcta}`, opciones, indiceCorrecta: 0, explicacion: "porque sí" })]
+  );
+  return id;
+}
+
+/** Atajo para la sesión que arma el `beforeEach`. */
+function pregunta(subtemaId: number, correcta: string): number {
+  return preguntaEn(SESION, subtemaId, correcta);
+}
+
+beforeEach(() => {
+  SESION = db.crearSesion("test", "texto de prueba", "gemma3:4b");
+  SUBTEMA = db.agregarSubtema(SESION, "Closures");
+});
+
+afterAll(() => {
+  // La base tiene que cerrarse antes de borrar el archivo: con la conexión abierta Windows
+  // tira EPERM y la base temporal queda en el disco.
+  db.default.close();
+  for (const sufijo of ["", "-wal", "-shm"]) fs.rmSync(DB_TEMP + sufijo, { force: true });
+});
+
+describe("registrarRespuesta", () => {
+  it("guarda la opción que eligió el usuario", () => {
+    const id = pregunta(SUBTEMA, "correcta");
+    db.registrarRespuesta(id, "distractor uno");
+    const [historial] = db.obtenerHistorialSesion(SESION);
+    expect(historial.opcionElegida).toBe("distractor uno");
+    expect(historial.correcta).toBe(false);
+  });
+
+  it("acierta con independencia de mayúsculas y espacios", () => {
+    expect(db.registrarRespuesta(pregunta(SUBTEMA, "Correcta"), "  correcta ").correcta).toBe(true);
+  });
+
+  it("acumula intentos y contadores reales", () => {
+    db.registrarRespuesta(pregunta(SUBTEMA, "uno"), "uno");
+    db.registrarRespuesta(pregunta(SUBTEMA, "dos"), "distractor uno");
+    const [sub] = db.obtenerSubtemas(SESION);
+    expect(sub.intentos).toBe(2);
+    expect(sub.correctas).toBe(1);
+    expect(sub.incorrectas).toBe(1);
+  });
+
+  it("un error resetea los aciertos seguidos", () => {
+    db.registrarRespuesta(pregunta(SUBTEMA, "uno"), "uno");
+    db.registrarRespuesta(pregunta(SUBTEMA, "dos"), "distractor uno");
+    expect(db.obtenerSubtemas(SESION)[0]?.aciertosSeguidos).toBe(0);
+  });
+
+  it("domina con 2 aciertos seguidos", () => {
+    let ultimo: { dominado?: boolean } = {};
+    for (const correcta of ["uno", "dos", "tres"]) {
+      ultimo = db.registrarRespuesta(pregunta(SUBTEMA, correcta), correcta);
+    }
+    expect(ultimo.dominado).toBe(true);
+    expect(db.obtenerSubtemas(SESION)[0]?.cubierto).toBe(true);
+  });
+
+  it("es idempotente: responder dos veces no cuenta el intento dos veces", () => {
+    const id = pregunta(SUBTEMA, "uno");
+    db.registrarRespuesta(id, "uno");
+    expect(db.registrarRespuesta(id, "uno").yaRespondida).toBe(true);
+    expect(db.obtenerSubtemas(SESION)[0]?.intentos).toBe(1);
+  });
+
+  it("al dominar, descarta las preguntas que sobran del lote", () => {
+    // El lote se genera ENTERO antes de responder (como hace el servidor), así que al dominar
+    // hay preguntas sin usar que hay que dejar de contar.
+    const lote = ["uno", "dos", "tres", "cuatro"].map((c) => pregunta(SUBTEMA, c));
+    db.registrarRespuesta(lote[0], "uno");
+    db.registrarRespuesta(lote[1], "dos");
+
+    const progreso = db.contarProgresoSesion(SESION);
+    expect(progreso.respondidas).toBe(2);
+    expect(progreso.totalServibles).toBe(2); // las 2 sobrantes quedaron descartadas
+  });
+
+  it("responder una pregunta descartada NO toca el desempeño del sub-tema", () => {
+    // Guard de §3.2: el cliente puede tener en caché una pregunta de un lote que el servidor ya
+    // descartó, y contestarla no puede "des-dominar" el sub-tema ni sumar intentos.
+    const lote = ["uno", "dos"].map((c) => pregunta(SUBTEMA, c));
+    db.registrarRespuesta(lote[0], "uno");
+    db.registrarRespuesta(lote[1], "dos");
+
+    // Una 4ta pregunta del mismo lote, ya descartada por el dominio.
+    const [sobro] = db.guardarLotePreguntas(SESION, SUBTEMA, "sondeo", [
+      JSON.stringify({
+        pregunta: "pregunta abandonada",
+        opciones: ["correcta", "d1", "d2", "d3"],
+        indiceCorrecta: 0,
+        explicacion: "porque sí",
+      }),
+    ]);
+    db.default.prepare("UPDATE preguntas SET descartada = 1 WHERE id = ?").run(sobro);
+
+    expect(db.registrarRespuesta(sobro, "d1").descartada).toBe(true);
+
+    const [sub] = db.obtenerSubtemas(SESION);
+    expect(sub.cubierto).toBe(true);
+    expect(sub.aciertosSeguidos).toBe(2);
+    expect(sub.intentos).toBe(2); // la abandonada NO sumó intento
+  });
+
+  it("tira si la pregunta no existe", () => {
+    expect(() => db.registrarRespuesta(999999, "x")).toThrow(/no existe/);
+  });
+});
+
+describe("elegirSiguienteSubtema", () => {
+  // Estos tests usan sesiones propias: el `beforeEach` crea un sub-tema que acá estorbaría.
+  function sesionLimpia(): number {
+    return db.crearSesion("para elegir", "texto", "gemma3:4b");
+  }
+
+  it("elige el menos avanzado de los que no están cubiertos", () => {
+    const sesion = sesionLimpia();
+    const a = db.agregarSubtema(sesion, "A");
+    const b = db.agregarSubtema(sesion, "B");
+    db.registrarRespuesta(preguntaEn(sesion, a, "uno"), "uno"); // A lleva 1 acierto
+
+    const siguiente = db.elegirSiguienteSubtema(db.obtenerSubtemas(sesion));
+    // B está más atrás (0 aciertos), así que va primero: la función sirve el menos avanzado.
+    expect(siguiente?.id).toBe(b);
+  });
+
+  it("devuelve null cuando no queda nada por cubrir", () => {
+    const sesion = sesionLimpia();
+    const a = db.agregarSubtema(sesion, "A");
+    for (const correcta of ["uno", "dos"]) {
+      db.registrarRespuesta(preguntaEn(sesion, a, correcta), correcta);
+    }
+    expect(db.elegirSiguienteSubtema(db.obtenerSubtemas(sesion))).toBeNull();
+  });
+});
+
+describe("sondeoCompleto", () => {
+  it("es cierto solo cuando todos los sub-temas están cubiertos", () => {
+    const sesion = db.crearSesion("para completo", "texto", "gemma3:4b");
+    const a = db.agregarSubtema(sesion, "A");
+    db.agregarSubtema(sesion, "B");
+    expect(db.sondeoCompleto(db.obtenerSubtemas(sesion))).toBe(false);
+    for (const correcta of ["uno", "dos"]) {
+      db.registrarRespuesta(preguntaEn(sesion, a, correcta), correcta);
+    }
+    expect(db.sondeoCompleto(db.obtenerSubtemas(sesion))).toBe(false);
+  });
+});
+
+describe("eliminarSesion", () => {
+  it("borra en el orden correcto de las foreign keys y no deja huérfanos", () => {
+    const id = db.crearSesion("para borrar", "texto", "gemma3:4b");
+    const sub = db.agregarSubtema(id, "Sub");
+    db.registrarRespuesta(preguntaEn(id, sub, "uno"), "uno");
+    db.guardarExplicaciones(id, [
+      { subtemaId: sub, orden: 0, tipo: "que_es", titulo: "T", contenido: "C" },
+    ]);
+
+    db.eliminarSesion(id);
+    expect(db.obtenerSesion(id)).toBeNull();
+    expect(db.obtenerSubtemas(id)).toEqual([]);
+    expect(db.obtenerExplicaciones(id, sub)).toEqual([]);
+  });
+});

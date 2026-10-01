@@ -15,6 +15,9 @@ const eslintConfig = defineConfig([
     // Server de pruebas de los humos (mismo distDir alternativo, ver next.config.ts):
     // si no, ESLint lintea el bundle compilado y tira cientos de errores ajenos.
     ".next-smoke/**",
+    // Scripts de una sola vez (scanners, probes). Ya están en .gitignore; acá solo para que
+    // `npm run lint` no falle por un archivo que no es del proyecto.
+    ".tmp-*",
   ]),
 ]);
 

@@ -27,6 +27,7 @@ import {
   esParecido,
   extraerExcerpt,
   ordenarPorAparicion,
+  repartirPorCuota,
   tokensSignificativos,
 } from "./texto"
 
@@ -659,8 +660,10 @@ export async function extraerSubtemas(
     }
   })
 
-  const candidatos = porBloque.flat()
-  let unicos = deduplicarPorSimilitud(candidatos, (subtema) => subtema)
+  // Cada candidato recuerda de qué bloque salió: sin eso, el corte final no puede repartir y
+  // vuelve a privilegiar el principio del documento (ver `repartirPorCuota`).
+  const candidatos = porBloque.flatMap((lista, indice) => lista.map((nombre) => ({ nombre, bloque: indice })))
+  let unicos = deduplicarPorSimilitud(candidatos, (candidato) => candidato.nombre)
 
   if (bloques.length > 1) {
     for (let intento = 0; intento < ajustes.intentosCobertura; intento++) {
@@ -670,13 +673,18 @@ export async function extraerSubtemas(
         const nuevos = await pedirSubtemas({
           prompt: construirPromptSubtemasCobertura({
             fuente: fuenteParaCobertura(texto),
-            yaDetectados: unicos,
+            yaDetectados: unicos.map((candidato) => candidato.nombre),
             cuantos: Math.max(1, objetivoTotal - unicos.length),
           }),
           modelo,
           proveedor,
         })
-        unicos = deduplicarPorSimilitud([...unicos, ...nuevos], (subtema) => subtema)
+        // La pasada de cobertura mira inicio y final, así que sus candidatos no son de un bloque
+        // concreto: se les asigna el último, que es el final del material (justo lo que hay que cubrir).
+        unicos = deduplicarPorSimilitud(
+          [...unicos, ...nuevos.map((nombre) => ({ nombre, bloque: bloques.length - 1 }))],
+          (candidato) => candidato.nombre
+        )
       } catch (error) {
         console.error("[subtemas] falló la pasada de cobertura:", error)
         break
@@ -686,12 +694,41 @@ export async function extraerSubtemas(
     }
   }
 
-  const subtemas = ordenarPorAparicion(unicos, texto, (subtema) => subtema).slice(0, ajustes.maxSubtemas)
+  // Ordenar por aparición es lo correcto para el ORDEN en que se estudia el material; para
+  // elegir cuáles entran hay que repartir por bloque, o el corte se lleva siempre el final.
+  const ordenados = ordenarPorAparicion(unicos, texto, (candidato) => candidato.nombre)
+  const seleccionados = repartirPorCuota(ordenados, (candidato) => candidato.bloque, ajustes.maxSubtemas)
+  const subtemas = ordenarPorAparicion(
+    seleccionados,
+    texto,
+    (candidato) => candidato.nombre
+  ).map((candidato) => candidato.nombre)
 
   // Diagnóstico honesto: material largo con pocos sub-temas significa que hay que mirarlo.
   if (bloques.length > 1 && subtemas.length < Math.min(5, ajustes.maxSubtemas)) {
     console.warn(
       `[subtemas] el material se partió en ${bloques.length} bloques y solo salieron ${subtemas.length} sub-temas`
+    )
+  }
+
+  // El descarte ya no es silencioso: si el material daba más conceptos de los que entran, se dice
+  // cuántos y de qué bloques, porque es información que el usuario puede querer (más de una vez
+  // el bloque entero se quedó afuera y no había forma de enterarse).
+  const descartados = ordenados.length - subtemas.length
+  if (descartados > 0) {
+    const porBloqueDescartado = new Map<number, number>()
+    const nombresElegidos = new Set(subtemas)
+    for (const candidato of ordenados) {
+      if (nombresElegidos.has(candidato.nombre)) continue
+      porBloqueDescartado.set(candidato.bloque, (porBloqueDescartado.get(candidato.bloque) ?? 0) + 1)
+    }
+    const detalle = [...porBloqueDescartado.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([bloque, cantidad]) => `bloque ${bloque + 1}: ${cantidad}`)
+      .join(", ")
+    console.warn(
+      `[subtemas] se detectaron ${ordenados.length} conceptos y entran ${subtemas.length} ` +
+        `(tope del preset); se descartaron por bloque → ${detalle}`
     )
   }
 

@@ -161,6 +161,70 @@ export function ordenarPorAparicion<T>(items: T[], documento: string, comoTexto:
 }
 
 /**
+ * Selección por reparto, NO por orden global.
+ *
+ * El bug que corrige: `extraerSubtemas` ordenaba todos los candidatos por su aparición en el
+ * documento y cortaba con `slice(0, max)`. Ordenar está bien (el sub-tema 1 del apunte es el
+ * primero que se estudia), pero usar ese orden como criterio de SELECCIÓN hace que el material
+ * largo se trunque siempre por el final: con un texto de 4 bloques y 17 candidatos, el corte se
+ * llevaba los 2 del último bloque. El final del documento se perdía, que es justo lo que la
+ * partición en bloques vino a arreglar.
+ *
+ * Ahora la cuota se reparte entre los bloques y, solo si sobra lugar, entra el resto por orden de
+ * aparición. Cada bloque aporta primero los suyos, en el orden en que aparecen en el texto.
+ *
+ * Es una función pura a propósito: el reparto es la parte que hay que poder testear sin modelo.
+ */
+export function repartirPorCuota<T>(
+  candidatos: T[],
+  bloqueDe: (candidato: T) => number,
+  max: number
+): T[] {
+  if (max <= 0) return [];
+  if (candidatos.length <= max) return candidatos.slice();
+
+  // Se agrupa por bloque conservando el orden de entrada (que ya viene por orden de aparición).
+  const porBloque = new Map<number, T[]>();
+  for (const candidato of candidatos) {
+    const bloque = bloqueDe(candidato);
+    const grupo = porBloque.get(bloque);
+    if (grupo) grupo.push(candidato);
+    else porBloque.set(bloque, [candidato]);
+  }
+
+  const grupos = [...porBloque.values()];
+  const elegidos: T[] = [];
+  const tomados = new Set<T>();
+
+  // Ronda 1: unipo por bloque. Con 4 bloques y tope 10, cada uno entra hasta 3 veces antes de que
+  // el primero vuelva a participar, así que el final del documento entra por construcción.
+  for (let vuelta = 0; vuelta < max; vuelta++) {
+    let sumoAlgo = false;
+    for (const grupo of grupos) {
+      if (elegidos.length >= max) break;
+      const candidato = grupo[vuelta];
+      if (candidato === undefined || tomados.has(candidato)) continue;
+      elegidos.push(candidato);
+      tomados.add(candidato);
+      sumoAlgo = true;
+    }
+    if (!sumoAlgo || elegidos.length >= max) break;
+  }
+
+  // Ronda 2: si algún bloque se quedó corto y quedó lugar, se completa por orden de aparición.
+  if (elegidos.length < max) {
+    for (const candidato of candidatos) {
+      if (elegidos.length >= max) break;
+      if (tomados.has(candidato)) continue;
+      elegidos.push(candidato);
+      tomados.add(candidato);
+    }
+  }
+
+  return elegidos;
+}
+
+/**
  * Parte el texto en bloques para extraer sub-temas sin perder el final del documento.
  * Corta por párrafo (nunca en medio de una oración) y arrastra un solape para que un
  * concepto que cruza el límite no quede afuera. Si con el tamaño pedido salen más

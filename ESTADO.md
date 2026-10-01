@@ -10,11 +10,15 @@ y el **filtro de calidad de preguntas** (validación local + juez semántico).
 > redacta) y se ajustaron §5, §6 y §11 según esa revisión. **Lo nuevo es plan, no estado verificado.**
 > El orden de trabajo vigente es el de §12.9.
 
-> **Corrección 30/09/2026 (3ª pasada, este commit):** la base de verificación decía `71e04b6` y entre
-> medio entró `8a4744a` ("Tanda 1: sub-temas por bloques con presets de calidad"), que **no estaba
+> **Corrección 30/09/2026 (3ª pasada):** la base de verificación decía `71e04b6` y entre medio
+> entró `8a4744a` ("Tanda 1: sub-temas por bloques con presets de calidad"), que **no estaba
 > reflejado en §1, §5, §7, §12.1 ni §12.2**. Los cinco lugares que lo describían como pendiente
 > quedaron desactualizados y se corrigieron acá. Se verificó por **lectura de código + SQL sobre
-> `useLearn.db` + una corrida real contra Ollama** (no con humos nuevos: la Tanda 1 no Agregó asserts).
+> `useLearn.db` + una corrida real contra Ollama** (no con humos nuevos: la Tanda 1 no agregó asserts).
+>
+> **Después, mismo día:** se implementó el **Paso 2b** (el corte final que se llevaba el final del
+> documento) y se instaló la primera infraestructura de tests (`vitest`, 39 tests). El §6 ítem 14
+> pasa de "0 tests" a "39 sobre la capa determinista" y el 2b queda cerrado. Ver §12.2.2 y §13.
 
 Base de la verificación (HEAD `ff7007e`, con `8a4744a` adentro):
 
@@ -249,11 +253,12 @@ al filtro de calidad:
     después 886; hoy son **935** (contadas en esta pasada). El modal ya no es el único problema del
     archivo, y el tamaño importa por una razón práctica (§12.8): el harness se rompe con ediciones
     parciales de archivos grandes.
-14. Tests automatizados (hoy **0**, confirmado en esta pasada: no hay `vitest` ni `tsx` en
-    `node_modules` y `package.json` no tiene script de test): al menos `lib/texto.ts`,
-    `lib/db.ts::registrarRespuesta`, el armado de payloads de `servirSiguiente`,
-    **`lib/validacion.ts`** (comparar strings es barato de testear y es la capa que más riesgos de
-    regresión tiene) y **`dividirEnBloques`**, que entró en `8a4744a` sin un solo assert.
+14. Tests automatizados — **started en esta tanda (30/09): 39 tests con `vitest`** sobre
+    `lib/texto.ts` (incluido `dividirEnBloques` y el reparto por cuota) y `lib/db.ts`
+    (`registrarRespuesta`, `elegirSiguienteSubtema`, `sondeoCompleto`, `eliminarSesion`), corriendo
+    contra una base temporal. Scripts nuevos: `npm test` y `npm run typecheck`. **Lo que falta:**
+    `lib/validacion.ts`, los payloads de `servirSiguiente`, el fail-open del juez (ítem 0b), el
+    chequeo de callers muertos del `verify` y partir `app/page.tsx`. Ver §13.
 15. Botón "esta pregunta está mal" (descarta y regenera el sub-tema).
 16. Modos de estudio (tema libre, desafío de código, error/stack trace, repaso) sobre las mismas
     tablas + un campo `modo`.
@@ -281,10 +286,10 @@ al filtro de calidad:
   los 6 sub-temas de antes daba 24; con los 10 de ahora da 40. **El riesgo residual sigue vivo y es
   otro:** si el usuario va lento o hay muchos sub-temas, el sondeo puede igual cerrar por tope sin
   evaluarlos a todos, y eso se ve como "quedaron sin dominar" (§3.4) en vez de pasar por "dominado".
-- **Sin tests:** toda la verificación de esta pasada fue manual + scripts temporales (borrados).
-  Los 2 humos no cubren el filtro de preguntas (§10.5) **ni la extracción por bloques** que entró
-  en `8a4744a`: `dividirEnBloques` no tiene un solo assert, y es la función de la que depende que
-  "el final del documento no se pierda" (§12.2.2).
+- **Tests: hay 39, pero la cobertura es parcial.** Cubren `lib/texto.ts` y `lib/db.ts`. **No cubren**
+  `lib/validacion.ts`, `lib/sondeo.ts` ni el filtro de preguntas (§10.5), que sigue siendo la capa con
+  más riesgo de regresión sin red. Los 2 humos end-to-end siguen pasando porque no ejercitan el juez.
+  No hay todavía un `npm run verify` que junte typecheck + lint + tests.
 - **Enseñar todavía no está verificado en el navegador:** los humos cubren API, persistencia y
   caché, pero CodeMirror, el `iframe sandbox` y los cambios de pantalla solo se probaron a mano.
 - **El par js/jsx depende del modelo:** `gemma4:26b` lo devuelve (verificado), `gemma4:e2b` tiende a
@@ -310,9 +315,10 @@ al filtro de calidad:
    recargar la página te deja donde estabas, no en el inicio.
 10. **Para ver la cobertura por bloques (Tanda 1):** pegá un texto largo (varios miles de caracteres
    con secciones claramente distintas) y poné el preset en `profundo`. Vas a ver muchos más sub-temas
-   que antes (hasta 12 en vez de 6) y la pantalla de confirmación te deja desmarcar. Si el texto es
-   largo, fijate en cuáles sobrevalentan: **hoy el corte se lleva siempre el final del documento**
-   (§12.2.2), así que es esperable que el último tema del apunte no aparezca.
+   que antes (hasta 12 en vez de 6) y la pantalla de confirmación te deja desmarcar. **Desde el fix
+   del reparto, el final del apunte también entra:** si el modelo detecta más conceptos de los que
+   entran, el log del server dice cuántos y de qué bloques se descartaron, y los sub-temas que
+   quedan vienen en orden de lectura (el último es del final del documento).
 
 > Nota: las corridas de prueba de esta verificación y de las anteriores (sesiones 52-55) ya se
 > borraron de la base. Las sesiones que se citan como evidencia de los bugs (46, 47 y 50) son las
@@ -672,6 +678,9 @@ la latencia (un lote por sub-tema, un juez por pregunta). El rediseño invierte 
 
 #### 12.2.2 Medición (30/09, 3ª pasada) — y el bug que encontró
 
+> **Actualización: el bug de abajo ya está CORREGIDO** (mismo día, commit del reparto por cuota). Se
+> conserva la medición porque es la que lo detectó y la que sirve de línea base para el test.
+
 Corrida real contra Ollama replicando `extraerSubtemas` paso a paso, sobre `.smoke-texto-largo.txt`
 (**9.865 chars**), con `gemma4:e2b`:
 
@@ -706,22 +715,34 @@ lo que la Tanda 1 vino a arreglar: la versión anterior mandaba un head de 3.5k 
 *por no mandarlo*; esta lo pierde *por descartar lo que sí mandó*. El síntoma es peor porque ahora
 es invisible: el modelo hizo el trabajo, el sub-tema existió, y se borró.
 
-**Cómo se arregla (propuesta, no implementada):** separar las dos cosas que el `slice` mezcla.
+**Cómo se arregló (hecho, 30/09):** separar las dos cosas que el `slice` mezclaba, con una función
+pura y testeable: `repartirPorCuota(candidatos, bloqueDe, max)` en `lib/texto.ts`.
 
-1. **Elegir por reparto de bloques, no por orden global.** Si hay 4 bloques y el tope es 10,
-   garantizar ~⌈10/4⌉ por bloque (respetando que un bloque corto da menos) y recién ahí usar el
-   orden de aparición para desempatar. Así el final del documento entra por construcción.
-2. **Advertirlo cuando pasa.** Hay un `console.warn` cuando salen pocos sub-temas
-   (`lib/ollama.ts:692`), pero solo mira el total, no *qué* se descartó. Si el corte se lleva el
-   último bloque, es información que el usuario debería ver ("cubrimos 9 de 17 conceptos; los
-   últimos los podés agregar a mano"), no un silencio.
-3. **Un test unitario de `dividirEnBloques` y del reparto** (hoy hay 0, §6 ítem 14): texto con N
-   secciones → todas aportan al menos un sub-tema.
+1. **Selección por reparto, orden por aparición.** `extraerSubtemas` ahora guarda de qué bloque
+   salió cada candidato (`{nombre, bloque}`), reparte la cuota entre bloques y recién después
+   reordena por aparición para mostrar. Son dos operaciones separadas: elegir *cuáles* entran y
+   decidir *en qué orden* se estudia. Antes era una sola (`ordenar...slice`), y por eso el corte
+   heredaba el criterio del orden.
+2. **El descarte dejó de ser silencioso.** Cuando se descarta algo, el log dice cuántos conceptos se
+   detectaron, cuántos entran y **de qué bloques** se perdieron.
+3. **Test unitario** del reparto y de `dividirEnBloques` (`tests/texto.test.ts`), incluido el caso
+   medido (4 bloques / 17 candidatos / tope 10) que es exactamente el que fallaba antes.
 
-**Lo que sigue pendiente de esta sección, entonces, son solo dos cosas:**
-`subtemas.fragmento` + usarla en preguntas y material (que también es el prerrequisito de §12.3), y
-el reparto del corte final. La partición sin IA, la sub-tema-por-módulo, el dedup, la cobertura y el
-presupuesto **ya están.**
+**Verificación del fix, mismo corpus y modelo que la medición:**
+
+| | Último bloque representado | Reparto por bloque |
+|---|---|---|
+| Antes (`slice` sobre orden global) | **1 de 2** | b1:5 b2:5 b3:0 b4:0 → el último bloque pierde 1 |
+| Después (reparto por cuota) | **2 de 2** | b1:3 b2:3 b3:2 b4:2 |
+
+Los 10 sub-temas finales salen en orden de lectura y el último de la lista es del bloque 4, o sea
+del final del documento. La corrida contra Ollama se hizo con un script temporal ya borrado; lo que
+queda en el repo son los tests, que fijan el comportamiento sin depender del modelo.
+
+**Lo que sigue pendiente de esta sección es una sola cosa:** `subtemas.fragmento` + usarla en
+preguntas y material (que también es el prerrequisito de §12.3). La partición sin IA, la
+sub-tema-por-módulo, el dedup, la cobertura, el presupuesto **y el reparto del corte final ya
+están.**
 
 ### 12.3 Preguntas: menos, mejores y sin repetición (e, f, i)
 
@@ -878,26 +899,20 @@ Reemplaza el orden de §11.8 y el de §6 (que queda como inventario de pendiente
 
 > **Ajustado en la 3ª pasada (30/09).** El Paso 0 se hizo parcialmente (causa de (g), colisiones de
 > nombre y tamaños de modelo ya están medidos y anotados; falta el juez, Enseñar en navegador y la
-> línea base completa) y el Paso 2 está **hecho en un 80% por `8a4744a`**. El paso que queda
-> **subió de prioridad** es el **2b**: el corte final por orden de aparición sacrifica el final del
-> documento (§12.2.2), es un bug chico y silencioso, y mientras siga así la cobertura que la Tanda 1
-> compró se está perdiendo sola.
+> línea base completa) y el Paso 2 está **cerrado**: `8a4744a` construyó la cobertura y el reparto por
+> cuota (2b) arregló el corte que se llevaba el final del documento. El Paso 1 está **a medias**:
+> ya hay runner y 39 tests, falta partir `page.tsx`, el `verify` y el botón de "pregunta mala".
 
 | Paso | Qué entrega | Se verifica con | Riesgo |
 |---|---|---|---|
 | 0. Medir | ~~Causa de (g)~~ ✅, ~~colisiones de nombre~~ ✅. Falta: juez real, Enseñar en navegador, línea base de GPU/RAM | Números anotados en este documento | Ninguno |
-| 1. Base | Partir `page.tsx`, tests mínimos (incluido `dividirEnBloques`), `verify`, botón "pregunta mala", set de prueba del juez | `npm run verify` en verde; tests del fail-open | Bajo |
-| 2. Cobertura | ✅ Hecho en `8a4744a`: bloques, presets, presupuesto. **2b (nuevo):** repartir el corte por bloques en vez de por orden global, y avisar lo que se descarta. **2c:** `subtemas.fragmento` + usarla en preguntas y material | Texto con N secciones → todas aportan; **con tope activo, el último bloque sigue representado** | Bajo-medio: es selección, no extracción |
+| 1. Base | **Parcial:** runner (`vitest`) + 39 tests ✅. Falta: partir `page.tsx`, `npm run verify` con chequeo de callers, botón "pregunta mala", set de prueba del juez, tests de `validacion.ts` y del fail-open | `npm run verify` en verde; tests del fail-open | Bajo |
+| 2. Cobertura | ✅ **Cerrada:** bloques, presets, presupuesto (`8a4744a`) + reparto del corte (2b). **2c (único resto):** `subtemas.fragmento` + usarla en preguntas y material | Texto con N secciones → todas aportan, con tope activo el último bloque sigue representado | Bajo |
 | 3. Ranuras y verificación | Ranuras, respuesta por ejecución, distractores, estados `sabido_probable` / `dominado` | Tests de ranuras; humos C1 y C/D actualizados | Medio-alto: cambia la semántica de dominio |
 | 4. Preparando | Pantalla de preparación persistida, Enseñar preparado entero | Recargar en medio de la preparación; humo nuevo | Medio |
 | 5. Memoria | `conceptos` con embeddings (§12.6 = Fase 1 de §11) | Dos sesiones con temas en común → un concepto con `veces_visto = 2`; test de pares vecinos | Bajo-medio |
 | 6. Enseñar rediseñado | Roles, andamiaje, extractivo, plantilla de ejercicio | Humo de Enseñar; golden de ejercicios | Medio |
 | 7. Repaso, progreso, videos | Fases 2-4 de §11 | Según §11 | Según §11 |
-
-Por qué 2b sube: es la continuación natural de algo ya verificado en esta pasada, no una feature
-nueva; el bug es de una línea (`slice` sobre orden global, `lib/ollama.ts:689`) y el test que lo
-fijaría entra naturalmente en el Paso 1. Por qué 2c (el `fragmento`) sigue después: es lo que
-habilita §12.3, pero no es urgente — mientras tanto `extraerExcerpt` funciona, solo a ciegas.
 
 Por qué el resto del orden: la base evita romper lo verificado; la cobertura va antes que las ranuras porque las
 ranuras necesitan el fragmento por sub-tema; "Preparando" va antes que la memoria porque define el flujo y es
@@ -917,7 +932,8 @@ con texto en español se editan con Node y no con PowerShell (reglas de trabajo 
 - Semántica de `sabido_probable` / `dominado` (§12.3) y su impacto en `calcularRutaSubtema`.
 - Umbral de similitud y política de confirmación para embeddings (§12.6).
 - Dónde ejecutar los snippets: `iframe sandbox` durante la preparación (propuesto) o servidor.
-- Cuál es hoy el tope real de sub-temas (§12.1).
+- Cuál es hoy el tope real de sub-temas (§12.1) — **resuelto en la 3ª pasada:** 6 / 10 / 12 según el
+  preset (`maxSubtemas`), no un `MAX_SUBTEMAS` único.
 
 **Lo que este plan no promete:**
 - La calidad de la **redacción** de explicaciones y ejemplos sigue dependiendo del modelo; el código garantiza
@@ -925,3 +941,80 @@ con texto en español se editan con Node y no con PowerShell (reglas de trabajo 
   y el botón de "pregunta mala" son parte del plan y no un extra.
 - La verificación por ejecución cubre JS puro; JSX y componentes siguen necesitando juez.
 - Ninguna cifra de tiempo o de descarte está medida todavía.
+
+## 13. Tanda del 30/09: reparto por cuota + arranque de los tests
+
+Dos cosas cerradas en la misma tanda, porque la segunda es lo que permite no volver a romper la
+primera sin avisarse. Todo verificado con el mismo corpus y modelo que §12.2.
+
+### 13.1 El fix: el corte final ya no se lleva el final del documento
+
+**Qué estaba mal.** `extraerSubtemas` terminaba en `ordenarPorAparicion(unicos, texto).slice(0, maxSubtemas)`:
+una sola operación para dos decisiones distintas. Ordenar por aparición es correcto —el sub-tema 1
+del apunte es el primero que se estudia—, pero usar **ese mismo orden como criterio de selección**
+hacía que el tope siempre cortara por el final del documento.
+
+**Qué se hizo.** Separar las dos decisiones con una función pura, `repartirPorCuota(candidatos,
+bloqueDe, max)` (`lib/texto.ts`):
+
+- `extraerSubtemas` ahora arrastra el bloque de origen de cada candidato (`{nombre, bloque}`), que
+  antes se perdía al aplanar con `.flat()`.
+- **Seleccionar** es por reparto de cuota (ronda 1: uno por bloque; ronda 2: completa por orden de
+  aparición si sobró lugar). **Ordenar** sigue siendo por aparición, sobre los ya seleccionados.
+- La pasada de cobertura asigna sus candidatos al último bloque, porque mira inicio y final.
+- Cuando se descarta algo, el log lo dice: cuántos conceptos se detectaron, cuántos entran y **de
+  qué bloques** se perdieron. El descarte dejó de ser silencioso.
+
+**Evidencia (mismo corpus, `gemma4:e2b`, 4 bloques, 17 candidatos, tope 10):**
+
+| | Del último bloque entran | Reparto por bloque |
+|---|---|---|
+| Antes | **1 de 2** | b1:5 b2:5 b3:0 b4:0 |
+| Después | **2 de 2** | b1:3 b2:3 b3:2 b4:2 |
+
+El último sub-tema de la lista final es del bloque 4, o sea del final del documento.
+
+### 13.2 Los tests (39) y qué fijan
+
+`vitest` + `npm test` + `npm run typecheck`. `tests/texto.test.ts` (26) y `tests/db.test.ts` (13),
+este último contra una base temporal propia (`USELEARN_DB` en `$TEMP`) que se borra al terminar, así
+que `useLearn.db` no se toca.
+
+Lo que queda fijado, y que antes dependía de que nadie lo tocara:
+
+- `repartirPorCuota`: el caso medido (el último bloque entra), el tope exacto, el reparto parejo
+  (diferencia ≤ 1 entre bloques), el orden dentro de cada bloque, que no duplique, topes 4/6/8/10/12,
+  y que un bloque corto no monopolice.
+- `dividirEnBloques`: que no se pierda texto al agrandar, que no corte palabras, 0 bloques con texto
+  vacío, 1 bloque con texto corto.
+- `registrarRespuesta`: que guarda la opción elegida, que hace match sin depender de mayúsculas o
+  espacios, que acumula contadores, que un error resetea los aciertos seguidos, que es idempotente,
+  que descarta las sobrantes al dominar, y **el guard de §3.2** (responder una pregunta descartada no
+  toca el desempeño del sub-tema).
+- `elegirSiguienteSubtema`, `sondeoCompleto`, `eliminarSesion` (orden de borrado por FKs).
+
+### 13.3 Verificación de la tanda
+
+| Comando | Resultado |
+|---|---|
+| `npm test` | **39/39 PASS** (2 archivos) |
+| `npx tsc --noEmit` | 0 errores |
+| `npm run lint` | 0 errores, 0 warnings |
+| `npm run build` | OK (13 rutas) |
+| Corrida contra Ollama (`gemma4:e2b`) | reparto verificado sobre el corpus real; script temporal borrado |
+
+**Un cambio de tooling:** `eslint.config.mjs` ahora ignora `.tmp-*`. Los scripts de una sola vez ya
+estaban en `.gitignore`, pero `npm run lint` no lo miraba y fallaba con uno que ya estaba en el repo
+(`.tmp-brace.cjs`). No es cosmético: **el lint tenía que estar rojo y no se notó**, porque hace un
+par de commits que nadie lo corrió. Es el mismo modo de falla de §10.1.
+
+### 13.4 Lo que esta tanda NO cubre
+
+- **El juez sigue sin medir** (§10.5, ítem 0): no hay test de su fail-open ni corrida con modelo real.
+- **`lib/validacion.ts` y `lib/sondeo.ts` sin tests**: la capa de validación de preguntas y el armado
+  de payloads siguen dependiendo de verificación manual.
+- **No hay `npm run verify`**: typecheck, lint y tests se corren por separado, así que es posible
+  commitear con uno en rojo (como pasó con el lint).
+- **`page.tsx` sigue en 935 líneas** y `ModalAjustes` sin extraer.
+- **El reparto está verificado con un corpus y un modelo.** El test fija la lógica, no que el modelo
+  detecte bien los conceptos: eso sigue siendo cuestión de prompt, no de código.
