@@ -48,6 +48,24 @@ interface ResponderResponse {
   siguienteError?: string;
 }
 
+interface PreguntaMalaResponse {
+  ok?: boolean;
+  yaReportada?: boolean;
+  error?: string;
+  siguiente?: SiguientePreguntaResponse;
+  siguienteError?: string;
+}
+
+/** Motivos del botón, en el mismo orden y con los mismos valores que el server. */
+const MOTIVOS: { valor: string; texto: string }[] = [
+  { valor: "respuesta_mal_marcada", texto: "La respuesta correcta está mal" },
+  { valor: "explicacion_contradicoria", texto: "La explicación se contradice" },
+  { valor: "enunciado_ambiguo", texto: "Da más de una respuesta válida" },
+  { valor: "no_respondible_con_el_texto", texto: "No se puede responder con el apunte" },
+  { valor: "repetida", texto: "Es repetida" },
+  { valor: "otra", texto: "Otra cosa" },
+];
+
 interface PreguntaEnCurso {
   subtemaId: number;
   subtemaNombre: string;
@@ -189,6 +207,14 @@ export default function FaseSondeo({
   const [progreso, setProgreso] = useState<ProgresoSondeo>(PROGRESO_INICIAL);
   const [subtemasDebiles, setSubtemasDebiles] = useState<string[]>([]);
   const [subtemasSinDominar, setSubtemasSinDominar] = useState<string[]>([]);
+  // Ítem 15 — "esta pregunta está mal". `motivoAbierto` es qué pregunta está con el menú
+  // desplegado (null = cerrado). El aviso de confirmación se maneja aparte porque la pregunta
+  // desaparece al instante: sin él, el click parece no haber hecho nada.
+  // `reporteEnviado` es un contador, no un flag, para que dos reportes seguidos del mismo motivo
+  // se vean igual (si fuera booleano, el segundo click no cambiaría el estado y no se rerenderiza).
+  const [motivoAbierto, setMotivoAbierto] = useState<number | null>(null);
+  const [reporteEnviado, setReporteEnviado] = useState(0);
+  const [reportando, setReportando] = useState(false);
 
   const finRef = useRef<HTMLDivElement>(null);
   const notificadoRef = useRef(false);
@@ -437,6 +463,62 @@ export default function FaseSondeo({
     }
   }
 
+  /**
+   * Ítem 15 — marca la pregunta activa como mala y avanza.
+   *
+   * El servidor la descarta y devuelve la siguiente en la misma respuesta, así que no se pide
+   * nada por la red después. La fila NO se borra: el reporte es el etiquetado del que sale el set
+   * golden para calibrar el juez (§10.5).
+   */
+  async function reportarYAvanzar(index: number, motivo: string) {
+    const item = historial[index];
+    if (!item || reportando) return;
+    setReportando(true);
+    setMotivoAbierto(null);
+    setReporteEnviado((n) => n + 1);
+
+    const config = leerConfigLocal();
+    try {
+      const res = await fetch("/api/sondeo/pregunta-mala", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          preguntaId: item.preguntaId,
+          motivo,
+          sesionId,
+          modeloPreguntas: config.modeloPreguntas,
+          modeloPrincipal: config.modeloPrincipal,
+          proveedorPreguntas: config.proveedorPreguntas,
+          proveedorPrincipal: config.proveedorPrincipal,
+          preset: config.preset,
+        }),
+      });
+      const data: PreguntaMalaResponse = await res.json().catch(() => ({}));
+
+      if (!data.ok) {
+        setError(data.error ?? "No se pudo marcar la pregunta");
+        setReporteEnviado(0);
+        return;
+      }
+
+      // La pregunta reportada no se cuenta como respondida ni toca el desempeño del sub-tema, así
+      // que el historial se deja como está y solo hay que sacar el ítem de la caché del lote.
+      cacheRef.current = cacheRef.current.filter((c) => c.preguntaId !== item.preguntaId);
+
+      if (data.siguiente) {
+        procesarPayload(data.siguiente);
+      } else {
+        // El server no devolvió siguiente (error al generarla): se pide por el camino normal.
+        await cargarSiguientePregunta();
+      }
+    } catch {
+      setError("No se pudo marcar la pregunta");
+      setReporteEnviado(0);
+    } finally {
+      setReportando(false);
+    }
+  }
+
   // Fase B.12 — atajos de teclado: 1–4 eligen opción, Enter avanza. El handler se
   // rearma con cada cambio de historial para leer la pregunta activa actual.
   const ultima = historial[historial.length - 1];
@@ -618,6 +700,47 @@ export default function FaseSondeo({
                 </p>
               </div>
             )}
+
+            {/* Ítem 15 — "esta pregunta está mal". Va debajo de la explicación, que es cuando
+                el usuario ya tiene la información para juzgar si la pregunta era justa. */}
+            <div className="mt-4">
+              {reporteEnviado > 0 ? (
+                <p className="flex items-center justify-center gap-1.5 text-[11px] text-neutral-500">
+                  <IconoCheck className="h-3 w-3 text-emerald-500/70" />
+                  Gracias, la descartamos.
+                </p>
+              ) : motivoAbierto === indiceActiva ? (
+                <div className="rounded-xl border border-neutral-800/60 bg-neutral-900/40 p-2">
+                  <p className="px-2 pb-1.5 text-[11px] text-neutral-500">¿Qué está mal?</p>
+                  <div className="flex flex-wrap gap-1">
+                    {MOTIVOS.map((m) => (
+                      <button
+                        key={m.valor}
+                        onClick={() => reportarYAvanzar(indiceActiva, m.valor)}
+                        disabled={reportando}
+                        className="rounded-full border border-neutral-800 px-2.5 py-1 text-[11px] text-neutral-400 transition-colors hover:border-neutral-600 hover:text-neutral-200 disabled:opacity-50"
+                      >
+                        {m.texto}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setMotivoAbierto(null)}
+                      className="rounded-full px-2.5 py-1 text-[11px] text-neutral-600 transition-colors hover:text-neutral-400"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setMotivoAbierto(indiceActiva)}
+                  className="mx-auto flex items-center gap-1.5 text-[11px] text-neutral-600 transition-colors hover:text-neutral-400"
+                >
+                  <IconoAlerta className="h-3 w-3" />
+                  Esta pregunta está mal
+                </button>
+              )}
+            </div>
 
             {activaRespondida ? (
               <button

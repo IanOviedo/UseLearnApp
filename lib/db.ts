@@ -133,6 +133,24 @@ asegurarColumna("sesiones", "modo", "TEXT NOT NULL DEFAULT 'apunte'");
 asegurarColumna("sesiones", "objetivo", "TEXT");
 asegurarColumna("sesiones", "nivel", "TEXT");
 
+// --- Feedback de calidad de preguntas (ítem 15) ------------------------------
+// El usuario puede marcar "esta pregunta está mal". No es una funcionalidad de adorno: es la
+// única fuente de etiquetado que tiene el proyecto, y de ella sale el set golden con el que se
+// calibra el juez semántico (§10.5). Sin esto, el juez no se puede evaluar nunca.
+//
+// Se guarda la pregunta completa y el motivo, y NO se borra la fila: una pregunta reportada es
+// justamente el dato más valioso que hay en la base. Lo que se marca es `descartada`, para que
+// deje de servirse y de contar en el total del sondeo.
+db.exec(`CREATE TABLE IF NOT EXISTS reportes_pregunta (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sesion_id INTEGER NOT NULL REFERENCES sesiones(id),
+  subtema_id INTEGER NOT NULL REFERENCES subtemas(id),
+  pregunta_id INTEGER NOT NULL REFERENCES preguntas(id),
+  motivo TEXT NOT NULL,
+  contenido TEXT NOT NULL,
+  creada_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+)`);
+
 db.exec("CREATE INDEX IF NOT EXISTS idx_preguntas_subtema ON preguntas(subtema_id, respondida)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_preguntas_sesion ON preguntas(sesion_id, descartada)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_subtemas_sesion ON subtemas(sesion_id)");
@@ -273,13 +291,14 @@ function listarSesionesConEstado(): {
 }
 
 const eliminarSesion = db.transaction((sesionId: number): void => {
-  // Orden por FKs: intentos → ejercicios → explicaciones → respuestas → preguntas →
+  // Orden por FKs: intentos → ejercicios → explicaciones → reportes → respuestas → preguntas →
   // subtemas → sesiones. Con foreign_keys = ON, borrar en otro orden tira un error.
   db.prepare(
     "DELETE FROM intentos_ejercicio WHERE ejercicio_id IN (SELECT id FROM ejercicios WHERE sesion_id = ?)"
   ).run(sesionId);
   db.prepare("DELETE FROM ejercicios WHERE sesion_id = ?").run(sesionId);
   db.prepare("DELETE FROM explicaciones WHERE sesion_id = ?").run(sesionId);
+  db.prepare("DELETE FROM reportes_pregunta WHERE sesion_id = ?").run(sesionId);
   db.prepare("DELETE FROM respuestas WHERE pregunta_id IN (SELECT id FROM preguntas WHERE sesion_id = ?)").run(sesionId);
   db.prepare("DELETE FROM preguntas WHERE sesion_id = ?").run(sesionId);
   db.prepare("DELETE FROM subtemas WHERE sesion_id = ?").run(sesionId);
@@ -297,6 +316,111 @@ function actualizarFaseSesion(sesionId: number, fase: string): void {
  */
 function finalizarSondeo(sesionId: number, feedback: string): void {
   db.prepare("UPDATE sesiones SET feedback_final = ?, fase_actual = 'plan' WHERE id = ?").run(feedback, sesionId);
+}
+
+// --- Reportes de preguntas malas (ítem 15) ------------------------------------
+
+/** Motivos que el botón ofrece. Texto corto y cerrado: el set golden necesita categorías limpias. */
+export const MOTIVOS_PREGUNTA_MALA = [
+  "respuesta_mal_marcada",
+  "explicacion_contradicoria",
+  "enunciado_ambiguo",
+  "no_respondible_con_el_texto",
+  "repetida",
+  "otra",
+] as const;
+
+export type MotivoPreguntaMala = (typeof MOTIVOS_PREGUNTA_MALA)[number];
+
+/** Resultado de reportar una pregunta: qué pasó y qué tiene que hacer el cliente. */
+export interface ResultadoReporte {
+  ok: boolean;
+  yaReportada: boolean;
+  subtemaId?: number;
+  motivo?: string;
+}
+
+const ES_MOTIVO_VALIDO = new Set<string>(MOTIVOS_PREGUNTA_MALA);
+
+/**
+ * Marca una pregunta como mala: la descarta del sondeo y guarda el reporte.
+ *
+ * Dos decisiones que conviene no revertir:
+ * - **No borra nada.** La fila de `preguntas` sigue ahí y el reporte guarda una copia del
+ *   contenido. Una pregunta que un usuario descartó es exactamente el ejemplo que necesita el
+ *   set golden del juez; borrarla sería tirar el dato.
+ * - **No cuenta como respuesta ni toca el desempeño del sub-tema.** Una pregunta mala no es un
+ *   error del usuario: si contara para `aciertos_seguidos` o sumara un intento, marcar una
+ *   pregunta podría "des-dominar" el sub-tema.
+ *
+ * Es idempotente: reportar dos veces la misma pregunta no duplica el reporte.
+ */
+const reportarPreguntaMala = db.transaction(
+  (preguntaId: number, motivo: string): ResultadoReporte => {
+    const pregunta = db
+      .prepare("SELECT id, sesion_id, subtema_id, contenido FROM preguntas WHERE id = ?")
+      .get(preguntaId) as
+      | { id: number; sesion_id: number; subtema_id: number; contenido: string }
+      | undefined;
+
+    if (!pregunta) throw new Error(`La pregunta ${preguntaId} no existe`);
+    if (!ES_MOTIVO_VALIDO.has(motivo)) {
+      throw new Error(`Motivo inválido: "${motivo}". Usar uno de: ${MOTIVOS_PREGUNTA_MALA.join(", ")}`);
+    }
+
+    const previa = db
+      .prepare("SELECT id FROM reportes_pregunta WHERE pregunta_id = ?")
+      .get(preguntaId) as { id: number } | undefined;
+
+    if (previa) {
+      // Ya estaba reportada: se asegura el descarte (por si se recargó la página) y no se duplica.
+      db.prepare("UPDATE preguntas SET descartada = 1 WHERE id = ?").run(preguntaId);
+      return { ok: true, yaReportada: true, subtemaId: pregunta.subtema_id, motivo };
+    }
+
+    db.prepare(
+      "INSERT INTO reportes_pregunta (sesion_id, subtema_id, pregunta_id, motivo, contenido) VALUES (?, ?, ?, ?, ?)"
+    ).run(pregunta.sesion_id, pregunta.subtema_id, preguntaId, motivo, pregunta.contenido);
+
+    // `descartada` la saca del total servible del sondeo y de `obtenerPreguntasSinResponder`,
+    // así que el cliente recibe la siguiente sin que haga falta un caso especial para esto.
+    db.prepare("UPDATE preguntas SET descartada = 1 WHERE id = ?").run(preguntaId);
+
+    return { ok: true, yaReportada: false, subtemaId: pregunta.subtema_id, motivo };
+  }
+);
+
+/** Reportes de una sesión, para el set golden del juez y para revisarlos a mano. */
+function obtenerReportes(sesionId: number): {
+  id: number;
+  preguntaId: number;
+  subtemaId: number;
+  motivo: string;
+  contenido: string;
+  creadaEn: string;
+}[] {
+  const filas = db
+    .prepare(
+      `SELECT id, pregunta_id, subtema_id, motivo, contenido, creada_en
+         FROM reportes_pregunta WHERE sesion_id = ? ORDER BY id`
+    )
+    .all(sesionId) as {
+    id: number;
+    pregunta_id: number;
+    subtema_id: number;
+    motivo: string;
+    contenido: string;
+    creada_en: string;
+  }[];
+
+  return filas.map((f) => ({
+    id: f.id,
+    preguntaId: f.pregunta_id,
+    subtemaId: f.subtema_id,
+    motivo: f.motivo,
+    contenido: f.contenido,
+    creadaEn: f.creada_en,
+  }));
 }
 
 // --- Sub-temas --------------------------------------------------------------
@@ -994,6 +1118,8 @@ export {
   obtenerPreguntasDelSubtema,
   obtenerEnunciadosSesion,
   registrarRespuesta,
+  reportarPreguntaMala,
+  obtenerReportes,
   obtenerErroresSesion,
   obtenerHistorialSesion,
   contarProgresoSesion,

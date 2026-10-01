@@ -260,7 +260,9 @@ al filtro de calidad:
     juez). Scripts: `npm test`, `npm run typecheck`, `npm run check:callers` y **`npm run verify`**
     (los cuatro encadenados). **Lo que falta:** tests de `lib/validacion.ts`, de los payloads de
     `servirSiguiente`, el set golden del juez y partir `app/page.tsx`. Ver §13.
-15. Botón "esta pregunta está mal" (descarta y regenera el sub-tema).
+15. ~~Botón "esta pregunta está mal"~~ **✅ hecho (30/09, §13.9).** Botón debajo de la explicación,
+    6 motivos cerrados, endpoint `POST /api/sondeo/pregunta-mala` y tabla `reportes_pregunta`.
+    **Lo que falta:** el set golden que se alimenta de estos reportes (siguiente paso).
 16. Modos de estudio (tema libre, desafío de código, error/stack trace, repaso) sobre las mismas
     tablas + un campo `modo`.
 17. Defaults de modelo: para preguntas sigue `gemma4:26b` (17 GB) aunque alcanza con `gemma4:e2b` o
@@ -1099,3 +1101,65 @@ espiar exports de ESM no es confiable; interceptar la red cubre la cadena real.
 - **`lib/validacion.ts` y `lib/sondeo.ts` sin tests.**
 - **`page.tsx` sigue en 935 líneas** y `ModalAjustes` sin extraer.
 - **El botón "esta pregunta está mal" no existe**, así que el set golden no tiene de dónde alimentarse.
+
+### 13.9 El botón "esta pregunta está mal" (ítem 15, cerrado)
+
+No es una feature de adorno: es **el único etiquetado que tiene el proyecto**, y de él sale el set
+golden con el que se calibra el juez (§10.5). Sin esto, el juez no se puede evaluar nunca.
+
+**Qué se construyó**
+
+| Pieza | Dónde | Qué hace |
+|---|---|---|
+| Tabla `reportes_pregunta` | `lib/db.ts` | `sesion_id`, `subtema_id`, `pregunta_id`, `motivo`, **`contenido`** (copia del JSON), `creada_en` |
+| `reportarPreguntaMala(id, motivo)` | `lib/db.ts` | Descarta la pregunta, guarda el reporte. Transacción e idempotente |
+| `obtenerReportes(sesionId)` | `lib/db.ts` | Los reportes de una sesión, para el golden set |
+| `MOTIVOS_PREGUNTA_MALA` | `lib/db.ts` | 6 motivos cerrados, tipados |
+| `POST/GET /api/sondeo/pregunta-mala` | `app/api/sondeo/pregunta-mala/route.ts` | Reporta y devuelve la siguiente en la misma respuesta; `GET` expone los motivos |
+| Botón en el sondeo | `components/sondeo/FaseSondeo.tsx` | Debajo de la explicación, con los 6 motivos |
+
+**Tres decisiones que conviene no revertir:**
+
+1. **No borra la fila de la pregunta.** Solo la marca `descartada` y guarda una copia del contenido
+   en el reporte. Una pregunta que el usuario descartó es exactamente el ejemplo que necesita el
+   golden set; borrarla sería tirar el dato. Por eso la tabla guarda `contenido` y no solo el id.
+2. **No toca el desempeño del sub-tema ni registra una respuesta.** Una pregunta mala no es un
+   error del usuario: si contara para `aciertos_seguidos` o sumara un intento, marcar una pregunta
+   podría "des-dominar" el sub-tema. Hay un assert que lo verifica.
+3. **El motivo es una lista cerrada y se valida en el servidor.** Un motivo desconocido da 400 en
+   vez de guardarse como `otra`: el motivo es el etiquetado, y un `otra` silencioso destruye
+   justamente el dato que se está tratando de capturar.
+
+**Verificación:** 9 asserts nuevos en `tests/db.test.ts` (persistencia, descarte, no-contaminación,
+idempotencia, motivo inválido, los 6 motivos, pregunta inexistente, borrado en cascada) y
+`.smoke-pregunta-mala.mjs`, un humo end-to-end por HTTP con **14 asserts** contra un dev server con
+base temporal: crea sesión, pide pregunta, reporta, y verifica que el total servible bajó, que el
+historial no cambió y que el sub-tema sigue con 0 intentos.
+
+**Dos cosas que aparecieron durante la implementación:**
+
+- `tsc` detectó `ok` duplicado en tres respuestas del route (`{ ok: true, ...reporte }` donde `reporte`
+  ya traía `ok`). El chequeo de callers no lo habría visto: no es código muerto, es redundancia.
+- El lint de React marca `Date.now()` dentro del handler (`react-hooks/purity`). El aviso de
+  confirmación pasó a ser un **contador** en vez de un objeto con timestamp, lo que además resuelve
+  un caso real: dos reportes seguidos del mismo motivo no cambian el estado y no se rerenderiza.
+
+### 13.10 Verificación de la tercera tanda
+
+| Comando | Resultado |
+|---|---|
+| `npm run verify` | **exit 0** (typecheck + lint + 60 tests + callers) |
+| `npm test` | **60/60 PASS** (3 archivos) |
+| `.smoke-pregunta-mala.mjs` (end-to-end HTTP) | **14 asserts PASS** |
+| `npm run build` | OK |
+
+### 13.11 Estado de la lista tras esta tanda
+
+| Ítem | Estado |
+|---|---|
+| 0. Probar el juez con modelo real | ❌ sigue abierto (es el set golden lo que falta) |
+| 0b. Asserts del fail-open | ✅ cerrado (§13.6) |
+| 15. Botón "pregunta mala" | ✅ cerrado (§13.9) |
+| 14. Tests | 🟡 60 tests; faltan `validacion.ts` y los payloads de `servirSiguiente` |
+| 13. Partir `page.tsx` | ❌ sigue abierto (935 líneas) |
+| 4. Regla de dominio | ❌ sigue abierto (Paso 3) |

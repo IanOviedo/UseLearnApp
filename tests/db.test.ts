@@ -133,6 +133,91 @@ describe("registrarRespuesta", () => {
   });
 });
 
+describe("reportarPreguntaMala (ítem 15)", () => {
+  // El server la llama `reportarPreguntaMala`, y estos tests usan el mismo nombre para que un
+  // grep por uno encuentre el otro.
+  const reportar = (id: number, motivo: string) => db.reportarPreguntaMala(id, motivo);
+
+  it("guarda el reporte con el motivo y una copia del contenido", () => {
+    const id = pregunta(SUBTEMA, "uno");
+    const resultado = reportar(id, "respuesta_mal_marcada");
+
+    expect(resultado.ok).toBe(true);
+    expect(resultado.yaReportada).toBe(false);
+    const [reporte] = db.obtenerReportes(SESION);
+    expect(reporte.motivo).toBe("respuesta_mal_marcada");
+    // La copia del contenido es lo que alimenta el set golden: sin ella, el reporte no sirve.
+    expect(JSON.parse(reporte.contenido).pregunta).toContain("uno");
+  });
+
+  it("descarta la pregunta para que no vuelva a servirse", () => {
+    const id = pregunta(SUBTEMA, "uno");
+    expect(db.contarProgresoSesion(SESION).totalServibles).toBe(1);
+    reportar(id, "otra");
+    expect(db.contarProgresoSesion(SESION).totalServibles).toBe(0);
+  });
+
+  it("NO toca el desempeño del sub-tema ni suma intentos", () => {
+    // Lo importante: una pregunta mala no es un error del usuario. Si contara, marcar una
+    // pregunta podría "des-dominar" el sub-tema.
+    const id = pregunta(SUBTEMA, "uno");
+    reportar(id, "respuesta_mal_marcada");
+
+    const [sub] = db.obtenerSubtemas(SESION);
+    expect(sub.intentos).toBe(0);
+    expect(sub.correctas).toBe(0);
+    expect(sub.incorrectas).toBe(0);
+    expect(sub.cubierto).toBe(false);
+  });
+
+  it("no la registra como respuesta", () => {
+    const id = pregunta(SUBTEMA, "uno");
+    reportar(id, "otra");
+    expect(db.obtenerHistorialSesion(SESION)).toEqual([]);
+  });
+
+  it("es idempotente: reportar dos veces no duplica el reporte", () => {
+    const id = pregunta(SUBTEMA, "uno");
+    reportar(id, "otra");
+    const segundo = reportar(id, "enunciado_ambiguo");
+
+    expect(segundo.yaReportada).toBe(true);
+    expect(db.obtenerReportes(SESION)).toHaveLength(1);
+    // El motivo original no se pisa: el primer reporte es el que vale.
+    expect(db.obtenerReportes(SESION)[0].motivo).toBe("otra");
+  });
+
+  it("rechaza un motivo fuera de la lista cerrada", () => {
+    const id = pregunta(SUBTEMA, "uno");
+    expect(() => reportar(id, "porque sí")).toThrow(/Motivo inválido/);
+    // Y no reporta nada: un motivo desconocido no puede guardarse como `otra` en silencio.
+    expect(db.obtenerReportes(SESION)).toEqual([]);
+  });
+
+  it("acepta todos los motivos de la lista", () => {
+    for (const motivo of db.MOTIVOS_PREGUNTA_MALA) {
+      const id = preguntaEn(SESION, SUBTEMA, `motivo-${motivo}`);
+      expect(reportar(id, motivo).ok).toBe(true);
+    }
+    expect(db.obtenerReportes(SESION)).toHaveLength(db.MOTIVOS_PREGUNTA_MALA.length);
+  });
+
+  it("tira si la pregunta no existe", () => {
+    expect(() => reportar(999999, "otra")).toThrow(/no existe/);
+  });
+
+  it("eliminar la sesión borra también los reportes (orden de FKs)", () => {
+    const id = db.crearSesion("para borrar reportes", "texto", "gemma3:4b");
+    const sub = db.agregarSubtema(id, "Sub");
+    const p = preguntaEn(id, sub, "uno");
+    db.reportarPreguntaMala(p, "otra");
+    expect(db.obtenerReportes(id)).toHaveLength(1);
+
+    db.eliminarSesion(id);
+    expect(db.obtenerReportes(id)).toEqual([]);
+  });
+});
+
 describe("elegirSiguienteSubtema", () => {
   // Estos tests usan sesiones propias: el `beforeEach` crea un sub-tema que acá estorbaría.
   function sesionLimpia(): number {
