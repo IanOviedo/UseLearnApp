@@ -17,8 +17,9 @@ y el **filtro de calidad de preguntas** (validación local + juez semántico).
 > `useLearn.db` + una corrida real contra Ollama** (no con humos nuevos: la Tanda 1 no agregó asserts).
 >
 > **Después, mismo día:** se implementó el **Paso 2b** (el corte final que se llevaba el final del
-> documento) y se instaló la primera infraestructura de tests (`vitest`, 39 tests). El §6 ítem 14
-> pasa de "0 tests" a "39 sobre la capa determinista" y el 2b queda cerrado. Ver §12.2.2 y §13.
+> documento), se instaló la infraestructura de tests (`vitest`), se cerró el **ítem 0b** (los asserts
+> del fail-open del juez) y se agregó **`npm run verify`** con un chequeo de callers muertos que
+> detecta solo el modo de falla de §10.1. Ver §12.2.2 y §13.
 
 Base de la verificación (HEAD `ff7007e`, con `8a4744a` adentro):
 
@@ -206,9 +207,11 @@ al filtro de calidad:
    Es lo único del commit `71e04b6` sin evidencia de runtime, y es el riesgo activo: un juez
    demasiado estricto vacía lotes y el usuario se queda sin preguntas. Mientras tanto, `rapido`
    no lo activa, así que hay una salida.
-0b. **Un assert de humo que fije el filtro.** Los dos humos pasan igual porque no ejercitan el
-   juez (es un `opts.juez` inyectado y los humos no lo pasan). Un assert con un juez que rechaza
-   todo, y otro con un juez que lanza, fijarían el comportamiento fail-open.
+0b. ~~**Un assert de humo que fije el filtro.**~~ **✅ cerrado (30/09, §13.5).** Son 12 asserts en
+   `tests/juez-fail-open.test.ts`: juez que acepta, que rechaza todo, que lanza (Ollama caído) y que
+   devuelve basura; más la interpretación del veredicto (incluido el `"false"` como string de §10.4).
+   **El riesgo real que se cerró es otro:** el test se escribía con preset `rapido` y pasaba sin
+   probar nada, porque `usarJuez` exige que el preset lo pida. Hay un assert que fija ese gateo.
 
 **Fase C — el Plan de verdad (chica, 1 sesión)**
 1. ~~Botón "Empezar a aprender"~~ ✅ hecho en C2/D (`POST /api/sesiones/[id]/fase`).
@@ -253,12 +256,10 @@ al filtro de calidad:
     después 886; hoy son **935** (contadas en esta pasada). El modal ya no es el único problema del
     archivo, y el tamaño importa por una razón práctica (§12.8): el harness se rompe con ediciones
     parciales de archivos grandes.
-14. Tests automatizados — **started en esta tanda (30/09): 39 tests con `vitest`** sobre
-    `lib/texto.ts` (incluido `dividirEnBloques` y el reparto por cuota) y `lib/db.ts`
-    (`registrarRespuesta`, `elegirSiguienteSubtema`, `sondeoCompleto`, `eliminarSesion`), corriendo
-    contra una base temporal. Scripts nuevos: `npm test` y `npm run typecheck`. **Lo que falta:**
-    `lib/validacion.ts`, los payloads de `servirSiguiente`, el fail-open del juez (ítem 0b), el
-    chequeo de callers muertos del `verify` y partir `app/page.tsx`. Ver §13.
+14. Tests automatizados — **51 tests con `vitest`** (`lib/texto.ts`, `lib/db.ts` y el fail-open del
+    juez). Scripts: `npm test`, `npm run typecheck`, `npm run check:callers` y **`npm run verify`**
+    (los cuatro encadenados). **Lo que falta:** tests de `lib/validacion.ts`, de los payloads de
+    `servirSiguiente`, el set golden del juez y partir `app/page.tsx`. Ver §13.
 15. Botón "esta pregunta está mal" (descarta y regenera el sub-tema).
 16. Modos de estudio (tema libre, desafío de código, error/stack trace, repaso) sobre las mismas
     tablas + un campo `modo`.
@@ -1010,11 +1011,91 @@ par de commits que nadie lo corrió. Es el mismo modo de falla de §10.1.
 
 ### 13.4 Lo que esta tanda NO cubre
 
-- **El juez sigue sin medir** (§10.5, ítem 0): no hay test de su fail-open ni corrida con modelo real.
+- **El juez sigue sin medirse** (§10.5, ítem 0): no hay test de su fail-open ni corrida con modelo real.
+  *(Esto se cerró en parte en la segunda tanda, §13.6: el comportamiento fail-open quedó fijado con
+  asserts. Lo que sigue abierto es la calibración del juez real.)*
 - **`lib/validacion.ts` y `lib/sondeo.ts` sin tests**: la capa de validación de preguntas y el armado
   de payloads siguen dependiendo de verificación manual.
 - **No hay `npm run verify`**: typecheck, lint y tests se corren por separado, así que es posible
-  commitear con uno en rojo (como pasó con el lint).
+  commitear con uno en rojo (como pasó con el lint). *(Resuelto en la segunda tanda, §13.5.)*
 - **`page.tsx` sigue en 935 líneas** y `ModalAjustes` sin extraer.
 - **El reparto está verificado con un corpus y un modelo.** El test fija la lógica, no que el modelo
   detecte bien los conceptos: eso sigue siendo cuestión de prompt, no de código.
+
+### 13.5 `npm run verify` y el chequeo de callers (cierra el modo de falla de §10.1)
+
+**`scripts/check-callers.mjs`** lista los exports de `lib/` que nadie importa. Existe por el juez
+semántico: compilaba, `tsc` daba 0, y el usuario recibía preguntas sin filtrar. El build verifica que
+el código *ande*, no que se *use*.
+
+**Tiene dos niveles, y esa diferencia importa.** Un export sin import puede ser un helper interno
+que se exporta "por las dudas" (ruido) o una feature que no conectó a ningún lado (el bug de §10.1).
+Lo que los separa es si el nombre se usa **dentro de su propio archivo**: los primeros van a `INFO`,
+los segundos hacen fallar el script. Un solo nivel habría tirado 18 falsos positivos y el script se
+habría ignorado al día siguiente.
+
+- **Nivel 1 (falla):** 3 exports que nadie usa — `db:guardarPregunta` (muerto desde Fase B),
+  `ollama:generarPregunta` y `db:obtenerPreguntasDelSubtema`. Están en `EXCEPCIONES` con motivo.
+- **Nivel 2 (info):** 17 exports que solo se usan dentro de su módulo (los `construirPrompt*`, que
+  son puros por diseño). Sugerencia de sacarles el `export`, no un error.
+- **Las excepciones se autolimitan:** si una excepción pasa a estar usada, el script falla y hay que
+  sacarla de la lista. Al activar el chequeo tiró 4 excepciones mías que estaban justificadas con
+  motivos inventados — las borré.
+
+**Verificación de que el chequeo sirve.** Se reprodujo el escenario exacto de §10.1: se desconectó el
+juez de `lib/sondeo.ts` (dejando de importar `juzgarLote` y sustituyendo su llamada) y el script
+falló con `evaluador:juzgarLote — exports que NADIE usa`. Después se restauró el archivo y `git diff`
+quedó vacío. **El detector detecta el bug que fue su motivo de existir.**
+
+`npm run verify` encadena `typecheck → lint → test → check:callers`. Antes se corrían por separado,
+que es justo lo que dejó pasar el lint rojo del §13.3.
+
+### 13.6 Los asserts del fail-open del juez (ítem 0b, cerrado)
+
+`tests/juez-fail-open.test.ts`, 12 asserts, sin tocar la red: se mockea `global.fetch` y se decide por
+el prompt si la respuesta es del generador del lote o del juez. Mockear el módulo no alcanzaba
+porque `llamarModelo` se importa desde dos rutas (relativa en `evaluador.ts`, alias en otros) y
+espiar exports de ESM no es confiable; interceptar la red cubre la cadena real.
+
+| Assert | Qué fija |
+|---|---|
+| juez acepta | el lote pasa |
+| juez lanza (Ollama caído) | **fail-open: el usuario igual recibe preguntas** |
+| juez devuelve basura (no JSON) | fail-open, no cuelgue |
+| juez rechaza todo | el lote queda vacío y `generarLotePreguntas` tira (riesgo de §10.5, fijado) |
+| preset `rapido` con juez inyectado | **el juez se ignora en silencio** |
+| preset `equilibrado` con juez inyectado | el juez sí corre |
+| `"false"` / `"true"` como string | el veredicto tiene que ser booleano (§10.4) |
+| motivo ausente, JSON inválido | comportamiento fail-open por pregunta |
+
+**Dos cosas que los tests destaparon y que no sabíamos:**
+
+1. **El gateo por preset es silencioso.** `usarJuez = Boolean(opts.juez) && (ajustes?.juezSemantico
+   ?? false)`: con preset `rapido` el juez inyectado **no corre**, sin avisar nada. El primer
+   borrador de estos tests usaba `rapido` y pasaba sin estar probando nada — tres asserts que
+   mentían. Es el mismo modo de falla de §10.1, aplicado a un test. Ahora hay un assert que fija el
+   gateo, y el comentario explica por qué.
+2. **`"true"` como string se rechaza, y es a propósito.** `parsed.valida === true` es estricto: un
+   veredicto que viene como string es un modelo respondiendo mal el formato, no un veredicto. El
+   test asumía lo contrario; el código tiene razón y el test se ajustó al comportamiento, con el
+   porqué anotado.
+
+### 13.7 Verificación de la segunda tanda
+
+| Comando | Resultado |
+|---|---|
+| `npm run verify` (los 4 encadenados) | **exit 0** |
+| `npm test` | **51/51 PASS** (3 archivos) |
+| `npx tsc --noEmit` | 0 errores |
+| `npm run lint` | 0 errores, 0 warnings |
+| `npm run build` | OK |
+| Chequeo de callers, con el juez desconectado a propósito | **FALLA como debe** |
+
+### 13.8 Lo que sigue abierto
+
+- **La calibración del juez sigue sin medirse** (§10.5): los asserts fijan que el *comportamiento* es
+  el correcto con un juez falso, no que el juez real rechace lo justo. Eso necesita el set golden
+  (§12.8) y correrlo con el modelo que se vaya a usar.
+- **`lib/validacion.ts` y `lib/sondeo.ts` sin tests.**
+- **`page.tsx` sigue en 935 líneas** y `ModalAjustes` sin extraer.
+- **El botón "esta pregunta está mal" no existe**, así que el set golden no tiene de dónde alimentarse.

@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:callers": "node scripts/check-callers.mjs",
+    "verify": "npm run typecheck && npm run lint && npm test && npm run check:callers"
   },
   "dependencies": {
     "@codemirror/lang-javascript": "^6.2.5",
