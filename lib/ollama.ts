@@ -7,6 +7,7 @@ import {
   EXCERPT_MAX_CHARS,
   MODELO_GEMINI,
   MODELO_NUBE_POR_DEFECTO,
+  MODELO_JUEZ,
   MODELO_PREGUNTAS_POR_DEFECTO,
   MODELO_PRINCIPAL_POR_DEFECTO,
   NUM_PREDICT_APUNTE,
@@ -857,6 +858,12 @@ export async function generarLotePreguntas(
       validas: Pregunta[];
       rechazadas: { indice: number; motivo: string }[];
     }>;
+    /**
+     * Modelo del juez. Por defecto `MODELO_JUEZ`: el juez es un papel distinto al del generador,
+     * y medirlo mostró que reutilizar el modelo de preguntas (26b) costaba ~30s por lote sin
+     * mejorar el recall. Ver §14.3 de ESTADO.md.
+     */
+    modeloJuez?: string;
   } = {}
 ): Promise<Pregunta[]> {
   // El preset manda: define cuántas preguntas trae el lote, si hay paso de ángulos y
@@ -920,7 +927,12 @@ export async function generarLotePreguntas(
     // basura y su trabajo se va en lo que la heurística NO puede ver (veracidad).
     if (usarJuez && validas.length > 0 && opts.juez) {
       try {
-        const veredicto = await opts.juez(validas, textoOriginal, modelo);
+        // El juez corre con MODELO_JUEZ, no con el de preguntas: son papeles distintos. La
+        // calibración de §14.3 mostró que con gemma3:4b el juez solo detectaba 1 de 6
+        // preguntas malas (recall 17%), y que con gemma4:26b un lote cuesta ~30s. Con
+        // MODELO_PREGUNTAS_POR_DEFECTO = gemma4:26b, el sondeo pagaba la latencia del
+        // juez sin ganar nada. Acá va un modelo que sí discrimina y responde rápido.
+        const veredicto = await opts.juez(validas, textoOriginal, opts.modeloJuez ?? MODELO_JUEZ);
         // Los rechazos del juez se realinean a índices del LOTE (no de `validas`) para
         // que `ultimoRechazo` siga CONTENTÁNDOSE con el índice que se está iterando.
         for (const r of veredicto.rechazadas) {

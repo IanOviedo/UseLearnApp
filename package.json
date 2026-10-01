@@ -10,6 +10,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "check:callers": "node scripts/check-callers.mjs",
+    "calibrar:juez": "node scripts/calibrar-juez.mjs",
     "verify": "npm run typecheck && npm run lint && npm test && npm run check:callers"
   },
   "dependencies": {

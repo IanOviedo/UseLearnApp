@@ -1157,9 +1157,83 @@ historial no cambió y que el sub-tema sigue con 0 intentos.
 
 | Ítem | Estado |
 |---|---|
-| 0. Probar el juez con modelo real | ❌ sigue abierto (es el set golden lo que falta) |
+| 0. Probar el juez con modelo real | ✅ **medido (30/09, §14.3)**: recall 67% y **0 falsos positivos** con `gemma4:e2b`. Sigue con un punto ciego conocido (ambigüedad) |
 | 0b. Asserts del fail-open | ✅ cerrado (§13.6) |
 | 15. Botón "pregunta mala" | ✅ cerrado (§13.9) |
 | 14. Tests | 🟡 60 tests; faltan `validacion.ts` y los payloads de `servirSiguiente` |
 | 13. Partir `page.tsx` | ❌ sigue abierto (935 líneas) |
 | 4. Regla de dominio | ❌ sigue abierto (Paso 3) |
+
+## 14. Calibración del juez: primera medición real (30/09/2026)
+
+Esta es la medición que §6 y §10.5 vinha marcando como pendiente desde el primer commit del filtro
+de calidad. Cierra el ítem 0 y **cambia una decisión de código** (§14.2).
+
+### 14.1 Qué se construyó
+
+| Pieza | Dónde | Qué hace |
+|---|---|---|
+| Set golden | `tests/golden/juez-casos.json` | 12 casos etiquetados a mano: 6 buenas y 6 malas, cada mala con su defecto deliberado |
+| Calibrador | `scripts/calibrar-juez.mjs` (`npm run calibrar:juez`) | Corre el juez real contra el set y devuelve **recall** y **falsos positivos** por separado |
+| Volcado de reportes | `calibrar-juez.mjs --reporte-nuevos` | Convierte los reportes del botón "esta pregunta está mal" en candidatos a casos |
+
+**Por qué la métrica NO es la tasa global de descarte.** Un juez que descarta el 100% tiene recall
+1 y falsos positivos 100: no sirve para nada. Con una sola cifra no se distingue "filtra bien" de
+"tira todo", así que el script reporta los dos números y falla si recall < 50% o falsos positivos
+> 33%. Ese umbral sale del riesgo real de §7: si el juez vacía lotes, el usuario se queda sin
+preguntas.
+
+### 14.2 El resultado, y el cambio de código que salió de medir
+
+| Modelo | recall de las malas | falsos positivos | tiempo (12 casos) | veredicto |
+|---|---|---|---|---|
+| `gemma3:4b` | **17%** (1/6) | 0% | ~8s | ❌ no filtra casi nada |
+| `gemma4:e2b` | **67%** (4/6) | **0%** | **4.0s** | ✅ usable |
+| `gemma4:26b` | 83% (5/6) | 0% | 34.9s | ✅ usable, caro |
+
+**Lo que dice el número grande: el juez NO descarta ninguna pregunta buena en ninguno de los tres
+modelos.** Es conservador, que es lo correcto: preferimos servir una pregunta dudosa antes que
+dejar al usuario sin lote.
+
+**Lo que dice el resto:**
+
+1. **La severidad escala con el modelo.** `gemma3:4b` detecta 1 de 6: como juez no cumple su
+   función. Esto confirma el matiz de §11.7: un juez chico mide la severidad de un juez chico, así
+   que medir el juez con el modelo más chico (la regla general de pruebas) **no** aplica acá.
+2. **El juez usaba el modelo equivocado.** `generarLotePreguntas` pasaba a `opts.juez` el `modelo`
+   del generador de preguntas, que por defecto es `gemma4:26b`. O sea: cada lote pagaba ~30s de
+   latencia para un juez que, con `e2b`, hace lo mismo en 4s. **Corregido:** existe `MODELO_JUEZ`
+   (`gemma4:e2b`) y el juez corre con su propio modelo, sobrescribible con `opts.modeloJuez`. Es el
+   mismo criterio de §12.0: son papeles distintos y no tienen que ser el mismo modelo.
+3. **El punto ciego es la ambigüedad, y es del prompt, no del modelo.** El único caso que **ningún**
+   modelo detecta es `mala-ambigua` (dos opciones correctas según el texto). El criterio CLARIDAD
+   está en la lista de criterios pero no tiene peso frente a VERACIDAD. Con 26b también se escapa
+   `mala-explicacion-contradice` (la opción es correcta pero la explicación dice lo contrario).
+
+**Decisión que NO se toma: relajar el prompt.** La tentación es "el juez es muy severo, hay que
+aflojarlo". Los números lo desmienten: **0 falsos positivos**. Relajar sube el recall y sube también
+el riesgo de tirar preguntas buenas, que es el modo de falla que más cuesta (§7). Lo que corresponde
+es reforzar el criterio de ambigüedad específicamente, no aflojar todo.
+
+### 14.3 Límites honestos de esta medición
+
+- **12 casos son pocos** para una conclusión firme. La tasa de recall tiene un error de ±15% con
+  este tamaño. Sirve para descartar lo extremo (el juez que no hace nada), no para ajustar el
+  prompt al detalle.
+- **Los casos son sintéticos y están escritos por quien construyó el juez.** Un set real —reportes
+  de usuarios— es lo que falta, y por eso existe el botón "esta pregunta está mal" (§13.9). Hoy
+  hay 0 reportes porque la feature es de hoy.
+- **El juez y el generador pueden ser el mismo modelo.** §12.8 recomienda que no lo sean; acá
+  `gemma4:e2b` es el que el usuario usa para todo, así que no se pudo evaluar esa separación.
+- **No se midió el costo por lote en producción.** Con `e2b` son 4s por lote de 3 (en paralelo),
+  pero en un equipo compartido con la pre-generación la competition por GPU sigue abierta (§7).
+
+### 14.4 Qué queda de §10.5
+
+| Antes | Ahora |
+|---|---|
+| "el juez puede ser demasiado estricto, sin medir" | **medido: 0 falsos positivos en 3 modelos** |
+| "coste y latencia del juez, no medidos" | **medido: 4s con e2b; el modelo de/questions estaba mal elegido y se corrigió** |
+| "si el juez se cae, fail-open" | **ya cubierto por asserts** (§13.6) |
+| "falta el set de prueba" | **existe, con 12 casos**; falta alimentarlo con reportes reales |
+

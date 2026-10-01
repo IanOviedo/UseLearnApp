@@ -10,6 +10,21 @@ export const MODELO_PREGUNTAS_POR_DEFECTO = "gemma4:26b";
 /** Modelo por defecto de un proveedor de nube compatible con OpenAI. */
 export const MODELO_NUBE_POR_DEFECTO = "openai/gpt-oss-120b";
 
+/**
+ * Modelo del juez semántico. Es un papel distinto al del generador de preguntas, y la medición
+ * (§14.3 de ESTADO.md) justifica separarlo:
+ *
+ * | Modelo           | recall de las malas | falsos positivos | 12 casos |
+ * |------------------|--------------------|------------------|----------|
+ * | `gemma3:4b`      | 17% (1/6)          | 0%               | casi no filtra |
+ * | `gemma4:e2b`     | **67% (4/6)**      | 0%               | usable y rápido |
+ * | `gemma4:26b`     | 83% (5/6)          | 0%               | usable, ~30s por lote |
+ *
+ * `e2b` es el corte: casi el recall del 26b (que pesa 17 GB y desborda la VRAM) con 4s en vez de
+ * 35s, y **cero falsos positivos** en los tres. Con `gemma3:4b` el juez no cumple su función.
+ */
+export const MODELO_JUEZ = "gemma4:e2b";
+
 /** Modelo de la integración nativa con Gemini (cuando no hay proveedor configurado). */
 export const MODELO_GEMINI = "gemini-flash-latest";
 

@@ -1,0 +1,223 @@
+{
+  "_comentario": [
+    "Set de calibración del juez semántico (lib/evaluador.ts).",
+    "",
+    "Cada caso tiene un texto de referencia, una pregunta y la ETIQUETA de cómo debería",
+    "verdictearla un humano. El juez se mide contra esto, no contra su propia salida.",
+    "",
+    "La MÉTRICA que importa NO es la tasa global de descarte (que se podría inflar",
+    "descartando todo): son dos números separados.",
+    "  - recall de las malas: cuántas de las etiquetadas como 'mala' detecta.",
+    "  - falsos positivos: cuántas de las etiquetadas como 'buena' descarta.",
+    "Un juez que descarta el 100% tiene recall 1 pero falsos positivos 100: inusable.",
+    "",
+    "Los casos 'mala' llevan el defecto DELIBERADO y visible, para que la prueba sea",
+    "reproducible. Los 'buena' son preguntas correctas y bien redactadas.",
+    "",
+    "Se amplía con los reportes del botón \"esta pregunta está mal\" (tabla reportes_pregunta):",
+    "cada reporte es un caso malo con motivo, y su texto de referencia sale de su sesión."
+  ],
+  "casos": [
+    {
+      "id": "buena-closure-1",
+      "esperada": "buena",
+      "nota": "Concepto central bien preguntado y bien explicado.",
+      "texto": "Un closure es una función que recuerda el ámbito lexicográfico donde fue creada, incluso después de que ese ámbito haya terminado de ejecutarse. Gracias a eso puede seguir accediendo a las variables de su entorno.",
+      "pregunta": {
+        "pregunta": "¿Qué es un closure en JavaScript y qué le permite hacer?",
+        "opciones": [
+          "Acceder a las variables del ámbito donde fue creada, aunque ese ámbito ya haya terminado",
+          "Se ejecuta automáticamente cada vez que cambia una variable global",
+          "Es una función que no puede acceder a variables externas",
+          "Es lo mismo que una función flecha declarada dentro de un objeto"
+        ],
+        "indiceCorrecta": 0,
+        "explicacion": "El closure conserva una referencia al ámbito donde se lo creó, por eso sigue viendo sus variables aunque la ejecución haya salido de ese ámbito."
+      }
+    },
+    {
+      "id": "buena-let-var-1",
+      "esperada": "buena",
+      "nota": "Distinción clásica, respuesta inequívoca.",
+      "texto": "Al declarar un bucle con for (var i = 0), todas las funciones creadas dentro comparten la misma variable i, porque var tiene ámbito de función. Al usar let en cambio, cada iteración crea un ámbito de bloque nuevo, así que cada closure guarda su propio valor de i.",
+      "pregunta": {
+        "pregunta": "¿Cuál es la diferencia entre usar var y let en el índice de un bucle que crea closures?",
+        "opciones": [
+          "let crea un ámbito de bloque por iteración, así que cada closure conserva su propio i",
+          "No hay diferencia: en ambos casos cada closure conserva el valor de i",
+          "var crea un ámbito por iteración y let comparte uno solo para todo el bucle",
+          "let impide usar closures dentro de bucles, var las permite"
+        ],
+        "indiceCorrecta": 0,
+        "explicacion": "var tiene ámbito de función y una sola variable i compartida; let declara una binding nueva en cada iteración del bloque del for."
+      }
+    },
+    {
+      "id": "buena-usestate-1",
+      "esperada": "buena",
+      "nota": "React hooks, respuesta correcta según el texto.",
+      "texto": "useState devuelve un array con dos elementos: el valor actual del estado y una función que lo actualiza. Llamar a la función de actualización con un nuevo valor hace que React vuelva a renderizar el componente con ese valor.",
+      "pregunta": {
+        "pregunta": "Según el texto, ¿qué devuelve la llamada a useState?",
+        "opciones": [
+          "Un array con el estado actual y la función para actualizarlo",
+          "Solo el valor actual del estado",
+          "Una función que reinicia el componente por completo",
+          "Un objeto con dos propiedades llamada valor y funcion"
+        ],
+        "indiceCorrecta": 0,
+        "explicacion": "El texto dice que devuelve un array de dos elementos: el valor y la función que lo actualiza."
+      }
+    },
+    {
+      "id": "buena-async-1",
+      "esperada": "buena",
+      "nota": "Concepto de promesas bien explicado.",
+      "texto": "Una función async devuelve siempre una Promise. El await suspende la ejecución hasta que esa Promise se resuelve, y solo entonces continúa con el valor recibido. Si la Promise se rechaza, el error se propaga y puede capturarse con try/catch.",
+      "pregunta": {
+        "pregunta": "¿Qué hace la palabra clave await dentro de una función async?",
+        "opciones": [
+          "Espera a que se resuelva la Promise y devuelve su valor",
+          "Convierte cualquier valor en una Promise nueva",
+          "Ejecuta la función en un hilo paralelo y devuelve ese hilo",
+          "Cancela la Promise actual y empieza otra"
+        ],
+        "indiceCorrecta": 0,
+        "explicacion": "await suspende la ejecución de la función async hasta que la Promise se resuelve, y devuelve ese valor."
+      }
+    },
+    {
+      "id": "buena-componente-1",
+      "esperada": "buena",
+      "nota": "Definición de componente React.",
+      "texto": "Un componente funcional es una función de JavaScript que devuelve elementos JSX. React la llama para renderizar la interfaz. Puede recibir props como argumento y usar hooks para mantener estado entre renderizados.",
+      "pregunta": {
+        "pregunta": "¿Qué devuelve un componente funcional de React?",
+        "opciones": [
+          "Elementos JSX que React usa para construir la interfaz",
+          "Un objeto con las props y los métodos del componente",
+          "Una Promise que resuelve con el HTML final",
+          "Un string con el HTML ya renderizado"
+        ],
+        "indiceCorrecta": 0,
+        "explicacion": "El texto dice que es una función que devuelve elementos JSX, que React usa para renderizar."
+      }
+    },
+    {
+      "id": "buena-map-1",
+      "esperada": "buena",
+      "nota": "Método de array, sin ambigüedad.",
+      "texto": "El método map de un array devuelve un array nuevo del mismo largo aplicando una función a cada elemento. No modifica el array original. Se usa para transformar listas y, en React, para renderizar una lista de elementos.",
+      "pregunta": {
+        "pregunta": "¿Qué devuelve el método map sobre un array?",
+        "opciones": [
+          "Un array nuevo con el resultado de aplicar la función a cada elemento",
+          "El mismo array original modificado en el lugar",
+          "Un número con la cantidad de elementos",
+          "Una Promise que resuelve con el array"
+        ],
+        "indiceCorrecta": 0,
+        "explicacion": "map devuelve un array nuevo del mismo largo y no modifica el original, según el texto."
+      }
+    },
+    {
+      "id": "mala-respuesta-marcada",
+      "esperada": "mala",
+      "motivo": "respuesta_mal_marcada",
+      "nota": "La opción marcada es la que el texto NO dice. Debería ser la 0.",
+      "texto": "El cierre léxico (closure) permite que una función acceda a las variables del ámbito donde fue declarada, incluso después de que la ejecución de ese ámbito haya terminado.",
+      "pregunta": {
+        "pregunta": "¿Qué permite el cierre léxico a una función?",
+        "opciones": [
+          "Acceder a las variables del ámbito donde fue declarada",
+          "Ejecutarse automáticamente cuando cambia una variable",
+          "Recibir argumentos infinitos",
+          "Convertirse en una función flecha"
+        ],
+        "indiceCorrecta": 3,
+        "explicacion": "El cierre léxico permite acceder a las variables del ámbito donde se declaró la función."
+      }
+    },
+    {
+      "id": "mala-explicacion-contradice",
+      "esperada": "mala",
+      "motivo": "explicacion_contradicoria",
+      "nota": "La opción marcada es correcta pero la explicación afirma lo contrario.",
+      "texto": "map crea un array nuevo aplicando una función a cada elemento del array original, y deja intacto el original.",
+      "pregunta": {
+        "pregunta": "Al aplicar map sobre un array, ¿qué ocurre con el array original?",
+        "opciones": [
+          "Queda intacto: map devuelve un array nuevo",
+          "Se modifica en el lugar, y además devuelve el mismo array",
+          "Se vacía después de devolver el nuevo array",
+          "Se convierte en un objeto inmutable"
+        ],
+        "indiceCorrecta": 0,
+        "explicacion": "map modifica el array original en el lugar, por eso no conviene usarlo sobre un estado de React porque genera mutaciones silenciosas."
+      }
+    },
+    {
+      "id": "mala-ambigua",
+      "esperada": "mala",
+      "motivo": "enunciado_ambiguo",
+      "nota": "Dos opciones son correctas según el texto: no hay respuesta única.",
+      "texto": "Una función async devuelve siempre una Promise. El await suspende la ejecución hasta que esa Promise se resuelve.",
+      "pregunta": {
+        "pregunta": "Según el texto, ¿qué ocurre al llamar a una función async?",
+        "opciones": [
+          "Devuelve una Promise",
+          "Espera a que se resuelva la Promise antes de continuar",
+          "Se ejecuta de forma bloqueante hasta terminar",
+          "Puede devolver cualquier tipo de valor"
+        ],
+        "indiceCorrecta": 0,
+        "explicacion": "Una función async siempre devuelve una Promise y el await suspende la ejecución hasta que se resuelve."
+      }
+    },
+    {
+      "id": "mala-no-respondible",
+      "esperada": "mala",
+      "motivo": "no_respondible_con_el_texto",
+      "nota": "La respuesta depende de GraphQL, que no aparece en el texto.",
+      "texto": "useState devuelve un array con dos elementos: el valor actual del estado y una función que lo actualiza.",
+      "pregunta": {
+        "pregunta": "¿Qué tipo de operación se usa en GraphQL para obtener datos de un servidor?",
+        "opciones": ["Una query", "Una mutation", "Un subscription", "Un fragmento"],
+        "indiceCorrecta": 0,
+        "explicacion": "En GraphQL las queries son las operaciones de lectura de datos."
+      }
+    },
+    {
+      "id": "mala-trivia",
+      "esperada": "mala",
+      "motivo": "otra",
+      "nota": "Comodín 'todas las anteriores': no evalúa nada.",
+      "texto": "map devuelve un array nuevo aplicando una función a cada elemento del array original.",
+      "pregunta": {
+        "pregunta": "¿Qué hace el método map?",
+        "opciones": [
+          "Devuelve un array nuevo transformado",
+          "Elimina los duplicados del array",
+          "No modifica el array original",
+          "Todas las anteriores"
+        ],
+        "indiceCorrecta": 3,
+        "explicacion": "map transforma el array y además evita los duplicados y las mutaciones."
+      }
+    },
+    {
+      "id": "mala-no-respondible-2",
+      "esperada": "mala",
+      "motivo": "no_respondible_con_el_texto",
+      "nota": "Habla de testing; el texto es de componentes.",
+      "texto": "Un componente funcional es una función de JavaScript que devuelve elementos JSX. React la llama para renderizar la interfaz.",
+      "pregunta": {
+        "pregunta": "¿Qué biblioteca se usa normalmente para testear componentes de React?",
+        "opciones": ["Testing Library", "Jest", "Playwright", "Todas las anteriores"],
+        "indiceCorrecta": 0,
+        "explicacion": "Testing Library es la biblioteca estándar para probar componentes de React."
+      }
+    }
+  ]
+}
+
