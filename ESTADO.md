@@ -260,9 +260,10 @@ al filtro de calidad:
     juez). Scripts: `npm test`, `npm run typecheck`, `npm run check:callers` y **`npm run verify`**
     (los cuatro encadenados). **Lo que falta:** tests de `lib/validacion.ts`, de los payloads de
     `servirSiguiente`, el set golden del juez y partir `app/page.tsx`. Ver §13.
-15. ~~Botón "esta pregunta está mal"~~ **✅ hecho (30/09, §13.9).** Botón debajo de la explicación,
-    6 motivos cerrados, endpoint `POST /api/sondeo/pregunta-mala` y tabla `reportes_pregunta`.
-    **Lo que falta:** el set golden que se alimenta de estos reportes (siguiente paso).
+15. ~~Botón "esta pregunta está mal"~~ **✅ hecho (§13.9), corregido y extendido a los ejercicios de
+    Enseñar (§15).** Botón en el sondeo (6 motivos) y en cada card de práctica (8 motivos), con
+    tablas `reportes_pregunta` y `reportes_ejercicio`. **Lo que falta:** alimentar el set golden
+    con reportes reales (queda pendiente a pedido del usuario).
 16. Modos de estudio (tema libre, desafío de código, error/stack trace, repaso) sobre las mismas
     tablas + un campo `modo`.
 17. Defaults de modelo: para preguntas sigue `gemma4:26b` (17 GB) aunque alcanza con `gemma4:e2b` o
@@ -1100,7 +1101,7 @@ espiar exports de ESM no es confiable; interceptar la red cubre la cadena real.
   (§12.8) y correrlo con el modelo que se vaya a usar.
 - **`lib/validacion.ts` y `lib/sondeo.ts` sin tests.**
 - **`page.tsx` sigue en 935 líneas** y `ModalAjustes` sin extraer.
-- **El botón "esta pregunta está mal" no existe**, así que el set golden no tiene de dónde alimentarse.
+- ⏸ **Set golden con reportes reales**: pendiente a pedido explícito del usuario. Ver §15.
 
 ### 13.9 El botón "esta pregunta está mal" (ítem 15, cerrado)
 
@@ -1233,7 +1234,74 @@ es reforzar el criterio de ambigüedad específicamente, no aflojar todo.
 | Antes | Ahora |
 |---|---|
 | "el juez puede ser demasiado estricto, sin medir" | **medido: 0 falsos positivos en 3 modelos** |
-| "coste y latencia del juez, no medidos" | **medido: 4s con e2b; el modelo de/questions estaba mal elegido y se corrigió** |
+| "coste y latencia del juez, no medidos" | **medido: 4s con e2b; el modelo del juez estaba mal elegido y se corrigió** |
 | "si el juez se cae, fail-open" | **ya cubierto por asserts** (§13.6) |
 | "falta el set de prueba" | **existe, con 12 casos**; falta alimentarlo con reportes reales |
+
+## 15. Botón de reportar: corrección en el sondeo y extensión a Enseñar (30/09/2026)
+
+### 15.1 Los dos bugs que reportó el usuario eran el mismo error
+
+**Síntoma:** "al marcar una, todas quedan marcadas" y "el botón de reportar desaparece al responder
+la primera pregunta".
+
+**Causa raíz única: `reporteEnviado` era un contador global que nunca volvía a cero.** Después del
+primer reporte quedaba en `1` para siempre, así que el ternario del render
+(`reporteEnviado > 0 ? "Gracias" : botón`) mostraba la confirmación **en todas las preguntas
+siguientes** en vez del botón. Encima había un segundo problema derivado: la pregunta reportada no
+salía del historial, así que `indiceActiva` seguía apuntando a ella y la pantalla mostraba una
+pregunta ya descartada.
+
+**Qué se cambió:**
+
+| Antes | Ahora |
+|---|---|
+| `reporteEnviado: number` (contador, nunca se reseteaba) | `reporteMensaje: string \| null` con vida de 2,6 s |
+| Confirmación pegada a la pregunta | Banner transitorio independiente de la pregunta |
+| La pregunta reportada quedaba en el historial | Sale del historial, de `vistas` y de la caché del lote |
+| Botón después de la explicación | Botón en **todas** las preguntas, respondidas o no |
+
+El botón quedó disponible antes de responder a propósito: si el enunciado o las opciones están mal,
+el error se ve al leer la pregunta, no hace falta equivocarse para detectarlo.
+
+### 15.2 Nuevo: "este ejercicio está mal" en Enseñar/Practicar
+
+| Pieza | Dónde | Qué hace |
+|---|---|---|
+| Tabla `reportes_ejercicio` | `lib/db.ts` | Igual forma que `reportes_pregunta`, con su propia tabla |
+| `MOTIVOS_EJERCICIO_MALA` (8) | `lib/db.ts` | `no_se_entiende`, `no_dice_que_hay_que_hacer`, `la_solucion_no_funciona`, `las_assertions_estan_mal`, `repetido`, `nada_que_ver_con_el_tema`, `muy_dificil`, `otra` |
+| `reportarEjercicioMalo` / `obtenerReportesEjercicio` | `lib/db.ts` | Transaccional e idempotente; guarda el JSON completo del ejercicio |
+| `POST/GET /api/aprender/ejercicio-mala` | `app/api/aprender/ejercicio-mala/route.ts` | Reporta y valida el motivo |
+| `BotonReportarEjercicio` | `components/aprender/BotonReportarEjercicio.tsx` | Botón + menú, montado en cada card de ejercicio |
+
+**Dos decisiones que conviene no revertir:**
+
+1. **El ejercicio NO se descarta.** Es contraintuitivo porque la pregunta del sondeo sí se descarta.
+   La razón: el material de Enseñar está cacheado por sub-tema, así que sacarlo a mitad de sesión le
+   quitaría al usuario la práctica de golpe. Y un reporte de "la solución no funciona" **solo sirve
+   si después se puede volver a abrir el ejercicio** para reproducirlo. Hay un test que fija esto.
+2. **Tabla aparte, no compartida con las preguntas.** El juez semántico de §14 evalúa preguntas del
+   sondeo; los ejercicios de código se verifican ejecutando. Mezclarlos arruinaría la calibración
+   del juez. También hay un test que verifica que no se mezclan.
+
+### 15.3 Verificación
+
+| Comando | Resultado |
+|---|---|
+| `npm run verify` | **exit 0** (typecheck + lint + **81 tests** + callers) |
+| `npm run build` | OK |
+| Tests nuevos | 9 de `reportarEjercicioMalo` + los de §13.9 |
+
+**Límite honesto:** el botón de ejercicios se verificó por compilación y por tests de la capa de
+datos, **no en el navegador**. Si al entrar a Enseñar no aparece al pie de cada card, es un problema
+de render y hay que mirarlo.
+
+### 15.4 Estado al cerrar el día
+
+- ✅ `npm run verify` en verde con 81 tests.
+- ✅ El juez tiene **medición real** (§14) y su propio modelo (`MODELO_JUEZ`).
+- ✅ Anti-repetición de ejercicios, "saltar" con registro, y diagnóstico de render (§13.9, §14).
+- ⏸ **Set golden con reportes reales**: pendiente a pedido explícito del usuario. Es lo que falta
+  para cerrar del todo el ítem 0 de §6: hoy el set tiene 12 casos curados, que alcanzan para
+  descartar lo extremo pero no para ajustar el prompt al detalle.
 
