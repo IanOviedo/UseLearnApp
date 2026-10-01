@@ -106,6 +106,11 @@ export interface SubtemaEstado {
   correctas: number;
   incorrectas: number;
   cubierto: boolean;
+  /**
+   * El usuario pasó a otro sub-tema sin terminarlo. NO afecta el dominio ni el dominio del
+   * ejercicio: solo la UI lo distingue de "pendiente" para no dejar un contador que nunca baja.
+   */
+  saltado: boolean;
 }
 
 export interface ProgresoSondeo {

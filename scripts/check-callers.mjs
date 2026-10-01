@@ -56,9 +56,13 @@ function exportsDe(contenido) {
   const declaracion = /^\s*export\s+(?:async\s+)?(?:function|const|class|let|var)\s+([A-Za-z_$][\w$]*)/gm;
   for (const match of contenido.matchAll(declaracion)) nombres.add(match[1]);
 
-  // Bloque `export { ... }` (con o sin `default`).
+  // Bloque `export { ... }` (con o sin `default`). Los comentarios se sacan antes de parsear:
+  // un `/** ... */` dentro del bloque rompe la separación por comas y, además, no es un export.
   for (const match of contenido.matchAll(/^\s*export\s*\{([^}]*)\}/gms)) {
-    for (const parte of match[1].split(",")) {
+    const sinComentarios = match[1]
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/[^\n]*/g, "");
+    for (const parte of sinComentarios.split(",")) {
       const limpio = parte.trim().replace(/^type\s+/, "").split(/\s+as\s+/).pop()?.trim();
       if (limpio) nombres.add(limpio);
     }

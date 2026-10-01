@@ -20,7 +20,6 @@ export default function EjercicioQuiz({ ejercicio, ultimoIntento, onAprobado }: 
   const [mostrarPista, setMostrarPista] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const yaAprobada = ultimoIntento?.aprobado ?? false;
-
   async function responder(opcion: string) {
     if (evaluada) return;
     setRespuesta(opcion);
@@ -49,7 +48,10 @@ export default function EjercicioQuiz({ ejercicio, ultimoIntento, onAprobado }: 
   const opciones = ejercicio.opciones ?? [];
 
   return (
-    <div className="rounded-2xl border border-neutral-800/60 bg-neutral-900/50 p-5 shadow-[0_24px_48px_-24px_rgba(0,0,0,0.85)]">
+    <div
+      data-ejercicio={ejercicio.id}
+      className="rounded-2xl border border-neutral-800/60 bg-neutral-900/50 p-5 shadow-[0_24px_48px_-24px_rgba(0,0,0,0.85)]"
+    >
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <span className="flex items-center gap-1.5 rounded-full border border-neutral-700/60 bg-neutral-800/60 px-2.5 py-0.5 text-xs text-neutral-300">
           <IconoObjetivo className="h-3.5 w-3.5" />

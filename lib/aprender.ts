@@ -8,7 +8,7 @@ import {
 import { llamarModelo, recortarEntre, sinBloquesDeCodigo } from "./ollama";
 import type { ProveedorNube } from "./proveedores";
 import type { AssertionEjercicio, RutaSubtema } from "./tipos";
-import { extraerExcerpt } from "./texto";
+import { extraerExcerpt, esParecido } from "./texto";
 
 // --- Fase D — material de la fase Enseñar/Practicar --------------------------
 //
@@ -323,8 +323,19 @@ function normalizarEjercicio(raw: unknown, orden: number): EjercicioGenerado | n
   };
 }
 
-/** Parsea el lote, descarta repetidos y topa en EJERCICIOS_POR_BLOQUE. */
-function parsearEjercicios(rawText: string): EjercicioGenerado[] {
+/**
+ * Parsea el lote, descarta repetidos y topa en EJERCICIOS_POR_BLOQUE.
+ *
+ * `previos` son los enunciados de los ejercicios que YA existen en la sesión (de otros sub-temas).
+ * Se comparan por similitud de tokens, el mismo criterio que usa el sondeo: no alcanza con igualdad
+ * exacta porque el mismo problema sale escrito de diez formas.
+ *
+ * Doble filtro, a propósito:
+ *  - contra `previos`: el enunciado se parece a algo que ya se practicó → fuera.
+ *  - contra el lote: la clave `tipo|variante|enunciado` evita comerse la variante `jsx` del mismo
+ *    problema que la `js`, que comparten enunciado a propósito.
+ */
+function parsearEjercicios(rawText: string, previos: string[] = []): EjercicioGenerado[] {
   const limpio = recortarEntre(sinBloquesDeCodigo(rawText), "[", "]");
 
   let parsed: unknown;
@@ -355,6 +366,16 @@ function parsearEjercicios(rawText: string): EjercicioGenerado[] {
       );
       continue;
     }
+
+    // Anti-repetición contra lo que ya se generó en la sesión.
+    const repetido = previos.find((previo) => esParecido(ejercicio.enunciado, previo, 0.6));
+    if (repetido) {
+      console.warn(
+        `[aprender] ejercicio descartado por repetido (ya existe uno parecido): "${ejercicio.enunciado.slice(0, 80)}"`
+      );
+      continue;
+    }
+
     // La clave incluye tipo y variante: las variantes js y jsx del mismo problema
     // comparten enunciado a propósito y tienen que sobrevivir las dos.
     const clave = [
@@ -375,6 +396,20 @@ function parsearEjercicios(rawText: string): EjercicioGenerado[] {
 
   return validos;
 }
+
+/**
+ * Parsea un lote de ejercicios que YA viene del modelo.
+ *
+ * Se separa de `generarEjercicios` a propósito: el parser es una función pura sobre texto y es
+ * la capa donde viven los dos filtros (repetición contra la sesión y dedup dentro del lote).
+ * Testearla por separado evita levantar un modelo para probar lógica de strings, que es el mismo
+ * criterio que se aplicó en `lib/texto.ts` y `lib/validacion.ts`.
+ */
+function parsearLoteDeEjercicios(rawText: string, previos: string[] = []): EjercicioGenerado[] {
+  return parsearEjercicios(rawText, previos);
+}
+
+export { parsearLoteDeEjercicios };
 
 export async function generarEjercicios(opts: {
   subtema: string;
@@ -397,5 +432,5 @@ export async function generarEjercicios(opts: {
     esquema: ESQUEMA_EJERCICIOS,
   });
 
-  return parsearEjercicios(rawText);
+  return parsearLoteDeEjercicios(rawText, opts.ejerciciosPrevios);
 }

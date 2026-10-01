@@ -79,7 +79,10 @@ export default function EjercicioCodigo({ ejercicio, ultimoIntento, onAprobado }
       : "JavaScript puro";
 
   return (
-    <div className="rounded-2xl border border-neutral-800/60 bg-neutral-900/50 p-5 shadow-[0_24px_48px_-24px_rgba(0,0,0,0.85)]">
+    <div
+      data-ejercicio={ejercicio.id}
+      className="rounded-2xl border border-neutral-800/60 bg-neutral-900/50 p-5 shadow-[0_24px_48px_-24px_rgba(0,0,0,0.85)]"
+    >
       <RunnerSandbox ref={sandboxRef} />
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">

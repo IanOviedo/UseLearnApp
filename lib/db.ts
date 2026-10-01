@@ -151,6 +151,11 @@ db.exec(`CREATE TABLE IF NOT EXISTS reportes_pregunta (
   creada_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 )`);
 
+// Saltar un sub-tema (ítem 15 bis). Antes "Saltar al siguiente" no dejaba rastro: el sub-tema
+// quedaba pendiente en el sidebar para siempre, sin forma de volver a marcarlo ni de distinguir
+// "no lo vi" de "lo vi y lo salteé". El dominio NO se toca: saltar no aprueba nada.
+asegurarColumna("subtemas", "saltado", "INTEGER NOT NULL DEFAULT 0");
+
 db.exec("CREATE INDEX IF NOT EXISTS idx_preguntas_subtema ON preguntas(subtema_id, respondida)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_preguntas_sesion ON preguntas(sesion_id, descartada)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_subtemas_sesion ON subtemas(sesion_id)");
@@ -490,8 +495,9 @@ function descartarSubtemas(sesionId: number, mantenerIds: number[]): ResultadoDe
 function obtenerSubtemas(sesionId: number): SubtemaEstado[] {
   const filas = db
     .prepare(
-      `SELECT id, nombre, aciertos_seguidos, cubierto, total_correctas, total_intentos, total_incorrectas
-       FROM subtemas WHERE sesion_id = ? ORDER BY id`
+      `SELECT id, nombre, aciertos_seguidos, cubierto, total_correctas, total_intentos,
+              total_incorrectas, saltado
+         FROM subtemas WHERE sesion_id = ? ORDER BY id`
     )
     .all(sesionId) as {
       id: number;
@@ -501,6 +507,7 @@ function obtenerSubtemas(sesionId: number): SubtemaEstado[] {
       total_correctas: number;
       total_intentos: number;
       total_incorrectas: number;
+      saltado: number;
     }[];
 
   return filas.map((fila) => ({
@@ -511,8 +518,25 @@ function obtenerSubtemas(sesionId: number): SubtemaEstado[] {
     correctas: fila.total_correctas,
     incorrectas: fila.total_incorrectas,
     cubierto: fila.cubierto === 1,
+    saltado: fila.saltado === 1,
   }));
 }
+
+/**
+ * Marca (o desmarca) un sub-tema como saltado.
+ *
+ * No toca `aciertos_seguidos` ni `cubierto` a propósito: saltar no es aprobar ni reprobar, es
+ * "lo vi y sigo". El flag existe para que la UI distinga "pendiente" de "saltado" en vez de dejar
+ * un contador que nunca baja y hace sentir que la sesión quedó a medias.
+ */
+const marcarSubtemaSaltado = db.transaction(
+  (subtemaId: number, saltado: boolean): { ok: boolean; saltado: boolean } => {
+    const existe = db.prepare("SELECT id FROM subtemas WHERE id = ?").get(subtemaId);
+    if (!existe) throw new Error(`El sub-tema ${subtemaId} no existe`);
+    db.prepare("UPDATE subtemas SET saltado = ? WHERE id = ?").run(saltado ? 1 : 0, subtemaId);
+    return { ok: true, saltado };
+  }
+);
 
 /**
  * Criterio único de "sub-tema débil": falló al menos una vez.
@@ -977,6 +1001,28 @@ function obtenerEjercicios(sesionId: number, subtemaId: number): Ejercicio[] {
   return filas.map(filaAEjercicio);
 }
 
+/**
+ * Enunciados de TODOS los ejercicios de la sesión, opcionalmente excluyendo un sub-tema.
+ *
+ * Es la entrada que anti-repetición necesita: el modelo no puede evitar repetir algo que no le
+ * mostraste. Antes se pasaba `[]` siempre (ver el route de `/api/aprender/bloque`), y por eso dos
+ * sesiones sobre el mismo tema generaron el mismo ejercicio — medido: "Crea una función llamada
+ * `configurarUsuario`..." con similitud 0.50 entre las sesiones 58 y 63.
+ *
+ * Se excluye el sub-tema propio porque sus variantes `js` y `jsx` comparten el enunciado a
+ * propósito: si entraran en la lista, el parser se comería la segunda variante del par.
+ */
+function obtenerEnunciadosEjercicios(sesionId: number, exceptoSubtemaId?: number): string[] {
+  const filas = db
+    .prepare(
+      `SELECT e.enunciado FROM ejercicios e
+        WHERE e.sesion_id = ? AND (? IS NULL OR e.subtema_id <> ?)
+        ORDER BY e.id`
+    )
+    .all(sesionId, exceptoSubtemaId ?? null, exceptoSubtemaId ?? null) as { enunciado: string }[];
+  return filas.map((f) => f.enunciado);
+}
+
 /** Un ejercicio por id (el endpoint de intentos lo usa para corregir quiz en el server). */
 function obtenerEjercicioPorId(ejercicioId: number): (Ejercicio & { sesionId: number }) | null {
   const fila = db
@@ -1101,11 +1147,15 @@ export {
   agregarSubtema,
   descartarSubtemas,
   obtenerSubtemas,
+  /** Saltar/des-saltar un sub-tema sin tocar el dominio. */
+  marcarSubtemaSaltado,
   guardarExplicaciones,
   guardarEjercicios,
   obtenerExplicaciones,
   obtenerEjercicios,
   obtenerEjercicioPorId,
+  /** Anti-repetición de ejercicios: enunciados de la sesión salvo los del sub-tema dado. */
+  obtenerEnunciadosEjercicios,
   registrarIntentoEjercicio,
   obtenerIntentosEjercicio,
   contarAprendizaje,

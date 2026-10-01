@@ -34,6 +34,31 @@ function pregunta(subtemaId: number, correcta: string): number {
   return preguntaEn(SESION, subtemaId, correcta);
 }
 
+/**
+ * Guarda un EJERCICIO (no una pregunta de sondeo): la anti-repetición de Enseñar trabaja sobre
+ * `ejercicios`, que es otra tabla. `guardarEjercicios` es la misma función que usa el server.
+ */
+function ejercicioEn(sesionId: number, subtemaId: number, enunciado: string): number {
+  const [id] = db.guardarEjercicios(sesionId, [
+    {
+      subtemaId,
+      orden: 0,
+      tipo: "codigo",
+      lenguaje: "js",
+      variante: "js",
+      enunciado,
+      plantilla: "function resolver() {}",
+      assertions: [{ descripcion: "define resolver", test: "typeof resolver === 'function'" }],
+      opciones: null,
+      indiceCorrecta: null,
+      pista: null,
+      solucion: null,
+      dificultad: "media",
+    },
+  ]);
+  return id;
+}
+
 beforeEach(() => {
   SESION = db.crearSesion("test", "texto de prueba", "gemma3:4b");
   SUBTEMA = db.agregarSubtema(SESION, "Closures");
@@ -130,6 +155,80 @@ describe("registrarRespuesta", () => {
 
   it("tira si la pregunta no existe", () => {
     expect(() => db.registrarRespuesta(999999, "x")).toThrow(/no existe/);
+  });
+});
+
+describe("obtenerEnunciadosEjercicios (anti-repetición)", () => {
+  // Es la entrada que evita que un sub-tema repita lo que ya se practicó en otro. El caso medido:
+  // las sesiones 58 y 63 generaron ambas "Crea una función llamada 'configurarUsuario'...".
+  it("devuelve vacío cuando la sesión no tiene ejercicios", () => {
+    expect(db.obtenerEnunciadosEjercicios(SESION)).toEqual([]);
+  });
+
+  it("devuelve los enunciados de todos los sub-temas de la sesión", () => {
+    const otro = db.agregarSubtema(SESION, "Otro");
+    ejercicioEn(SESION, SUBTEMA, "ejercicio del primero");
+    ejercicioEn(SESION, otro, "ejercicio del segundo");
+
+    const enunciados = db.obtenerEnunciadosEjercicios(SESION);
+    expect(enunciados).toHaveLength(2);
+    expect(enunciados.some((e) => e.includes("primero"))).toBe(true);
+    expect(enunciados.some((e) => e.includes("segundo"))).toBe(true);
+  });
+
+  it("excluye los ejercicios del sub-tema indicado", () => {
+    // Importa: las variantes js y jsx del propio sub-tema comparten enunciado a propósito, y si
+    // entraran en la lista el parser se comería la segunda variante del par.
+    const otro = db.agregarSubtema(SESION, "Otro");
+    ejercicioEn(SESION, SUBTEMA, "ejercicio propio");
+    ejercicioEn(SESION, otro, "ejercicio ajeno");
+
+    const enunciados = db.obtenerEnunciadosEjercicios(SESION, SUBTEMA);
+    expect(enunciados).toHaveLength(1);
+    expect(enunciados[0]).toContain("ajeno");
+  });
+
+  it("no ve ejercicios de otra sesión", () => {
+    const otraSesion = db.crearSesion("otra", "texto", "gemma3:4b");
+    const subOtro = db.agregarSubtema(otraSesion, "Ajeno");
+    ejercicioEn(otraSesion, subOtro, "ejercicio de otra sesion");
+    ejercicioEn(SESION, SUBTEMA, "ejercicio de esta");
+
+    const enunciados = db.obtenerEnunciadosEjercicios(SESION);
+    expect(enunciados).toHaveLength(1);
+    expect(enunciados[0]).toContain("esta");
+  });
+});
+
+describe("marcarSubtemaSaltado", () => {
+  it("empieza en false y se puede alternar", () => {
+    expect(db.obtenerSubtemas(SESION)[0]?.saltado).toBe(false);
+
+    expect(db.marcarSubtemaSaltado(SUBTEMA, true).saltado).toBe(true);
+    expect(db.obtenerSubtemas(SESION)[0]?.saltado).toBe(true);
+
+    expect(db.marcarSubtemaSaltado(SUBTEMA, false).saltado).toBe(false);
+    expect(db.obtenerSubtemas(SESION)[0]?.saltado).toBe(false);
+  });
+
+  it("NO toca el dominio: saltar no es aprobar ni reprobar", () => {
+    // El punto de la decisión: si saltar modificara el desempeño, el usuario podría "apostar"
+    // saltando los que le salen mal.
+    db.registrarRespuesta(pregunta(SUBTEMA, "uno"), "uno");
+    const antes = db.obtenerSubtemas(SESION)[0];
+
+    db.marcarSubtemaSaltado(SUBTEMA, true);
+    const despues = db.obtenerSubtemas(SESION)[0];
+
+    expect(despues.intentos).toBe(antes.intentos);
+    expect(despues.correctas).toBe(antes.correctas);
+    expect(despues.cubierto).toBe(antes.cubierto);
+    expect(despues.aciertosSeguidos).toBe(antes.aciertosSeguidos);
+    expect(despues.saltado).toBe(true);
+  });
+
+  it("tira si el sub-tema no existe", () => {
+    expect(() => db.marcarSubtemaSaltado(999999, true)).toThrow(/no existe/);
   });
 });
 

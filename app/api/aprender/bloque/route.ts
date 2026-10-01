@@ -3,6 +3,7 @@ import {
   guardarEjercicios,
   guardarExplicaciones,
   obtenerEjercicios,
+  obtenerEnunciadosEjercicios,
   obtenerErroresSesion,
   obtenerExplicaciones,
   obtenerIntentosEjercicio,
@@ -16,7 +17,7 @@ import {
   type ErrorSubtema,
 } from "@/lib/aprender";
 import { calcularRutaSubtema } from "@/lib/practica";
-import { MODELO_PRINCIPAL_POR_DEFECTO } from "@/lib/config";
+import { EJERCICIOS_POR_BLOQUE, MODELO_PRINCIPAL_POR_DEFECTO } from "@/lib/config";
 import { proveedorDesdeParams } from "@/lib/proveedores";
 import type { IntentoEjercicio, ProveedorPayload } from "@/lib/tipos";
 
@@ -64,10 +65,25 @@ export async function POST(request: NextRequest) {
     let explicaciones = obtenerExplicaciones(sesionId, subtemaId);
     let ejercicios = obtenerEjercicios(sesionId, subtemaId);
 
+    // Diagnóstico del bug "el sidebar dice 3 y solo se muestran 2": la base tiene los 3
+    // (verificado sobre los 30 ejercicios reales), así que la pérdida ocurre entre esta
+    // respuesta y el render. Estos números permiten localizar en qué capa se pierde sin adivinar.
+    const diagnostico = {
+      enBase: ejercicios.length,
+      generados: 0,
+      servidos: 0,
+      ids: [] as number[],
+      tipos: [] as string[],
+      pedidosPrevios: 0,
+    };
+
     const faltanExplicaciones = explicaciones.length === 0 && cantidadExplicaciones(ruta) > 0;
     const faltanEjercicios = ejercicios.length === 0;
 
     if (faltanExplicaciones || faltanEjercicios) {
+      const previos = faltanEjercicios ? obtenerEnunciadosEjercicios(sesionId, subtemaId) : [];
+      diagnostico.pedidosPrevios = previos.length;
+
       // Errores concretos del estudiante EN este sub-tema: son los que anclan la
       // primera explicación de la ruta "reforzar" ("elegiste X, lo correcto era Y").
       const errores: ErrorSubtema[] = obtenerErroresSesion(sesionId)
@@ -90,14 +106,25 @@ export async function POST(request: NextRequest) {
               subtema: subtema.nombre,
               textoOriginal: sesion.textoOriginal,
               modo: sesion.modo === "tema_libre" ? "tema_libre" : "apunte",
-              // Solo se genera cuando no hay ninguno: por eso no hay previos. El día
-              // que se permita "generar más ejercicios" acá van los enunciados actuales.
-              ejerciciosPrevios: [],
+              // Anti-repetición: TODOS los ejercicios ya generados en la sesión, excluyendo los
+              // del propio sub-tema (sus variantes js/jsx comparten enunciado a propósito).
+              // Antes se pasaba `[]` siempre, así que el modelo no tenía forma de saber qué ya
+              // existía: es lo que producía el mismo ejercicio en sesiones distintas.
+              ejerciciosPrevios: previos,
               modelo,
               proveedor,
             })
           : Promise.resolve([]),
       ]);
+
+      diagnostico.generados = nuevosEjercicios.length;
+      // El generador devuelve los válidos; lo que sale de la base es la última palabra.
+      if (diagnostico.generados < EJERCICIOS_POR_BLOQUE) {
+        console.warn(
+          `[aprender] el modelo devolvió ${diagnostico.generados} ejercicios para "${subtema.nombre}" ` +
+            `de los ${EJERCICIOS_POR_BLOQUE} esperados (previos ya vistos: ${previos.length})`
+        );
+      }
 
       if (nuevasExplicaciones.length > 0) {
         guardarExplicaciones(
@@ -124,7 +151,20 @@ export async function POST(request: NextRequest) {
       ultimosIntentos[ejercicio.id] = intentos.length > 0 ? intentos[intentos.length - 1] : null;
     }
 
-    return NextResponse.json({ ruta, explicaciones, ejercicios, ultimosIntentos });
+    diagnostico.servidos = ejercicios.length;
+    diagnostico.ids = ejercicios.map((e) => e.id);
+    diagnostico.tipos = ejercicios.map((e) => e.tipo + ":" + (e.variante ?? "-"));
+
+    // El aviso es por el server, no por el cliente: si acá hay 3 y en pantalla hay 2, el problema
+    // está entre la respuesta y el render, y este log ya lo deja dicho en el terminal.
+    if (diagnostico.servidos < EJERCICIOS_POR_BLOQUE) {
+      console.warn(
+        `[aprender] "${subtema.nombre}" sirve ${diagnostico.servidos} ejercicios de ${EJERCICIOS_POR_BLOQUE}: ` +
+          `base=${diagnostico.enBase} generados=${diagnostico.generados} ids=${diagnostico.ids}`
+      );
+    }
+
+    return NextResponse.json({ ruta, explicaciones, ejercicios, ultimosIntentos, diagnostico });
   } catch (error) {
     console.error("Error generando el bloque de aprendizaje:", error);
     return NextResponse.json(

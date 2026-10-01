@@ -37,6 +37,21 @@ interface BloqueAprendizaje {
   explicaciones: Explicacion[];
   ejercicios: Ejercicio[];
   ultimosIntentos: Record<number, IntentoEjercicio | null>;
+  /**
+   * Números del server para localizar en qué capa se pierde un ejercicio. El caso reportado era
+   * "el sidebar dice 3 y solo se ven 2": la base tiene los 3, así que si acá `servidos` es 3 y
+   * `pintados` es 2, el problema está en el render, y no hay forma de adivinarlo sin esto.
+   */
+  diagnostico?: {
+    enBase: number;
+    generados: number;
+    servidos: number;
+    ids: number[];
+    tipos: string[];
+    pedidosPrevios: number;
+  };
+  /** Cuántos ejercicios se pintaron de verdad. Contra `servidos` es el detector del bug. */
+  pintados?: number;
 }
 
 interface FaseEnsenarProps {
@@ -72,6 +87,63 @@ export default function FaseEnsenar({ sesionId, estado, onCerrar }: FaseEnsenarP
   const [cerrando, setCerrando] = useState(false);
   const [errorCerrar, setErrorCerrar] = useState<string | null>(null);
 
+  /**
+   * Sub-temas saltados, en estado local para que el sidebar reaccione al instante. La fuente de
+   * verdad es el servidor: `estado.subtemas[].saltado` al cargar, y el endpoint al saltar.
+   */
+  const [saltados, setSaltados] = useState<Set<number>>(
+    () => new Set(estado.subtemas.filter((s) => s.saltado).map((s) => s.id))
+  );
+
+  /**
+   * Salta al siguiente sub-tema dejando registro. El registro es lo que faltaba: antes solo se
+   * cambiaba el `useState`, así que al recargar volvía a "pendiente" con un contador que no bajaba.
+   * El avance no espera al POST: la UI responde al instante y si el registro falla, el error sale
+   * aparte sin dejar al usuario trabado.
+   */
+  async function saltarA(siguienteId: number, actualId: number) {
+    setSubtemaActivo(siguienteId);
+    if (saltados.has(actualId)) return;
+    setSaltados((previos) => new Set(previos).add(actualId));
+    try {
+      await fetch("/api/aprender/saltar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subtemaId: actualId, saltado: true }),
+      });
+    } catch {
+      // Sin conexión el registro se pierde, pero el avance ya pasó: no se bloquea al usuario.
+      setSaltados((previos) => {
+        const copia = new Set(previos);
+        copia.delete(actualId);
+        return copia;
+      });
+      setError("No se pudo registrar que saltaste este sub-tema.");
+    }
+  }
+
+  /**
+   * Detector del bug "el sidebar dice 3 y solo se ven 2": cuenta cuántos ejercicios están
+   * REALMENTE en el DOM y lo compara con los que llegaron del servidor.
+   *
+   * Se cuenta desde el DOM y no desde un estado con un contador, porque el contador mentiría justo
+   * en el caso que queremos detectar: si React no monta una card, ningún `setState` lo registra.
+   * Con `querySelectorAll` la pregunta es directa: ¿están las tres en pantalla?
+   *
+   * `-1` = todavía no medido (evita un `setState` directo en el efecto, que el lint de React no
+   * permite); el setPintados real ocurre dentro del `requestAnimationFrame`, ya diferido.
+   */
+  const [pintados, setPintados] = useState(-1);
+  useEffect(() => {
+    if (!bloque) return;
+    // Un frame de margen: el efecto corre después del commit, pero el layout de las cards
+    // anidadas (que las monta un efecto propio) necesita un tick más.
+    const id = requestAnimationFrame(() => {
+      setPintados(document.querySelectorAll("[data-ejercicio]").length);
+    });
+    return () => cancelAnimationFrame(id);
+  }, [bloque]);
+
   const cargarBloque = useCallback(
     async (subtemaId: number) => {
       setCargando(true);
@@ -91,6 +163,9 @@ export default function FaseEnsenar({ sesionId, estado, onCerrar }: FaseEnsenarP
             subtemaId,
             modeloPrincipal: config.modeloPrincipal,
             proveedor: config.proveedorPrincipal,
+            // El preset también aplica acá: sin esto, el material se genera con los defaults del
+            // server y no con los que el usuario eligió en Ajustes (mismo bug que tenía el sondeo).
+            preset: config.preset,
           }),
         });
         const data = await res.json();
@@ -103,6 +178,7 @@ export default function FaseEnsenar({ sesionId, estado, onCerrar }: FaseEnsenarP
           explicaciones: Array.isArray(data.explicaciones) ? data.explicaciones : [],
           ejercicios: Array.isArray(data.ejercicios) ? data.ejercicios : [],
           ultimosIntentos: data.ultimosIntentos ?? {},
+          diagnostico: data.diagnostico,
         });
       } catch {
         setError("No se pudo conectar con el servidor.");
@@ -126,8 +202,39 @@ export default function FaseEnsenar({ sesionId, estado, onCerrar }: FaseEnsenarP
     };
   }, [subtemaActivo, cargarBloque]);
 
+  // Completar un sub-tema que se había saltado lo devuelve al estado normal: si no, el sidebar
+  // seguiría diciendo "saltado" sobre un sub-tema que el usuario terminó, que es peor que mentiroso.
+  // Se resuelve en `marcarAprobado` (evento) y no en un efecto: el lint de React no permite
+  // setState sincrónico dentro de un efecto, y además acá el aprobado es el que dispara el cambio.
+  function desSaltarSiSeCompleto(subtemaId: number, yaAprobados: Set<number>) {
+    if (!todasPracticasAprobadas(yaAprobados)) return;
+    setSaltados((previos) => {
+      if (!previos.has(subtemaId)) return previos;
+      const copia = new Set(previos);
+      copia.delete(subtemaId);
+      return copia;
+    });
+    void fetch("/api/aprender/saltar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subtemaId, saltado: false }),
+    }).catch(() => {
+      /* si falla el POST, el flag queda en "saltado": es cosmético y no bloquea nada */
+    });
+  }
+
+  /** Todas las prácticas del sub-tema actual quedaron aprobadas (contando intentos previos). */
+  function todasPracticasAprobadas(conAprobados: Set<number>): boolean {
+    if (!bloque || bloque.ejercicios.length === 0) return false;
+    return bloque.ejercicios.every(
+      (ejercicio) => conAprobados.has(ejercicio.id) || bloque.ultimosIntentos[ejercicio.id]?.aprobado === true
+    );
+  }
+
   function marcarAprobado(ejercicioId: number) {
-    setAprobados((previos) => new Set(previos).add(ejercicioId));
+    const nuevos = new Set(aprobados).add(ejercicioId);
+    setAprobados(nuevos);
+    desSaltarSiSeCompleto(subtemaActivo, nuevos);
   }
 
   async function cerrar() {
@@ -159,6 +266,9 @@ export default function FaseEnsenar({ sesionId, estado, onCerrar }: FaseEnsenarP
 
   /** Progreso del sidebar: el sub-tema activo en vivo, los demás con la base. */
   function resumenSubtema(subtemaId: number): string {
+    // "Saltado" tiene que distinguirse de "pendiente": sin esto, el contador queda clavado en
+    // 2/3 para siempre y la sesión parece rota aunque el usuario haya seguido adelante.
+    if (saltados.has(subtemaId)) return "saltado";
     if (subtemaId === subtemaActivo && bloque) {
       const lecturas = `${Math.min(indiceExplicacion, bloque.explicaciones.length)}/${bloque.explicaciones.length} lecturas`;
       const practicas = `${bloque.ejercicios.filter(
@@ -251,10 +361,10 @@ export default function FaseEnsenar({ sesionId, estado, onCerrar }: FaseEnsenarP
               </div>
               {siguienteSubtema && (
                 <button
-                  onClick={() => setSubtemaActivo(siguienteSubtema.id)}
+                  onClick={() => void saltarA(siguienteSubtema.id, subtemaActivo)}
                   className="flex items-center gap-1.5 rounded-full border border-neutral-800 px-3.5 py-1.5 text-xs text-neutral-400 transition-colors hover:border-neutral-700 hover:text-neutral-200"
                 >
-                  Saltar al siguiente
+                  {saltados.has(subtemaActivo) ? "Ir al siguiente" : "Saltar al siguiente"}
                   <IconoFlecha className="h-3.5 w-3.5" />
                 </button>
               )}
@@ -345,6 +455,29 @@ export default function FaseEnsenar({ sesionId, estado, onCerrar }: FaseEnsenarP
                 <p className="text-xs uppercase tracking-wider text-neutral-500">
                   Práctica ({bloque.ejercicios.length})
                 </p>
+
+                {/* Aviso de desajuste: si llegaron N ejercicios y hay M en pantalla, el bug es de
+                    render y esto lo dice en vez de dejarlo silencioso. Con N > M se muestra la
+                    diferencia; con N < M el problema es del server y su console.warn lo avisa. */}
+                {pintados >= 0 && pintados !== bloque.ejercicios.length && (
+                  <div className="flex items-start gap-2.5 rounded-xl border border-amber-500/25 bg-amber-500/[0.06] px-4 py-3">
+                    <IconoAlerta className="mt-0.5 h-4 w-4 shrink-0 text-amber-400/80" />
+                    <div className="text-[12px] leading-relaxed text-amber-200/90">
+                      <p>
+                        Llegaron <strong>{bloque.ejercicios.length}</strong> ejercicios y se están
+                        mostrando <strong>{pintados}</strong>. Te faltan{" "}
+                        {bloque.ejercicios.length - pintados > 0
+                          ? `${bloque.ejercicios.length - pintados} práctica(s).`
+                          : "datos por corregir."}
+                      </p>
+                      <p className="mt-1 text-[11px] text-amber-200/60">
+                        Diagnóstico: {bloque.diagnostico
+                          ? `en base ${bloque.diagnostico.enBase}, generados ${bloque.diagnostico.generados}, servidos ${bloque.diagnostico.servidos} · ${bloque.diagnostico.tipos.join(", ")}`
+                          : "el servidor no mandó diagnóstico"}
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {bloque.ejercicios.map((ejercicio) =>
                   ejercicio.tipo === "quiz" ? (
