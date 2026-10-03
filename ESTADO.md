@@ -1,4 +1,4 @@
-# useLearn — estado real verificado (última pasada: 30/09/2026)
+# useLearn — estado real verificado (última pasada: 02/10/2026)
 
 Este archivo reemplaza al panorama del documento de diseño, que quedó desactualizado.
 No describe lo que *debería* ser: describe lo que **verifiqué** en el repo y en la base
@@ -37,6 +37,71 @@ Base de la verificación (HEAD `ff7007e`, con `8a4744a` adentro):
 > feature esté conectada. El juez semántico compilaba perfecto y no se llamaba desde ningún
 > lado: el usuario recibía las preguntas sin filtrar. Ver §10.1. Antes de dar por buena una
 > feature nueva, hay que grepar quién la invoca.
+
+## 16. Tanda del 02/10/2026: memoria entre sesiones, cierre completo y cobertura del fragmento
+
+Esta pasada cierra §12.2 (el resto de (g)), §11.2-11.4 (memoria + repaso + progreso),
+§6 ítems 9-10-11 (cierre, export, mezcla) y §11.5 (videos), más los tests que faltaban de
+`lib/validacion.ts`. **No toca la semántica de dominio** (ver §16.5).
+
+> **Verificación de esta tanda:** `npm run verify` (typecheck + lint + tests + callers),
+> `npm test` (**108/108** en 7 archivos) y `npm run build` (todas las rutas nuevas compilan).
+> **Ollama no estaba corriendo**, así que no se pudo re-correr ningún humo end-to-end ni medir
+> latencia/calidad: lo de abajo está verificado por compilación, tests unitarios y lectura de
+> código, **no** por ejecución contra un modelo.
+
+### 16.1 Cobertura: `subtemas.fragmento` (cierra el único resto de (g), §12.2.1)
+
+- `agregarSubtema(sesionId, nombre, fragmento)` guarda el fragmento donde apareció cada
+  sub-tema; `extraerSubtemas` ahora devuelve `fragmentos[]` (el bloque de origen de cada
+  candidato, recortado con `extraerExcerpt`).
+- Sondeo y fase Enseñar usan `subtema.fragmento ?? sesion.textoOriginal` como fuente: con
+  material largo el nombre del sub-tema muchas veces no aparece literal en el texto completo
+  y `extraerExcerpt` caía al head del documento.
+- Migración idempotente (`asegurarColumna("subtemas","fragmento","TEXT")`).
+
+### 16.2 Memoria entre sesiones + repaso espaciado + progreso (§11.2-11.4)
+
+- Tabla `conceptos` (`nombre_normalizado UNIQUE`, veces_visto/acierto/fallo, `caja`,
+  `proximo_repaso`) y `subtemas.concepto_id`. Punto de escritura único: `agregarSubtema`
+  resuelve/crea el concepto y lo enlaza.
+- Deduplicación **determinista, sin LLM**: nombre normalizado exacto + similitud de tokens
+  ≥ 0.85. Lo que queda afuera crea concepto nuevo (duplicado visible > fusión silenciosa).
+  **Los embeddings de §12.6 siguen pendientes:** la medición de §12.1 dice que cierran ~la
+  mitad del problema, pero requieren `nomic-embed-text` y un set de calibración.
+- Repaso espaciado **Leitner de 3 cajas** (1/3/7 días): un acierto sube la caja, un fallo la
+  vuelve a 1. Se actualiza al responder en el sondeo **y** al aprobar un ejercicio.
+- `GET /api/repaso`, `POST /api/repaso/crear` (sesión `modo: "repaso"` sobre los conceptos,
+  reusando su fragmento original), `GET /api/progreso` y página `/progreso`. La landing
+  muestra **"Te tocan N conceptos"** con un botón para repasar.
+- Tests: `tests/memoria.test.ts` (7) fijan el vínculo entre sesiones, el Leitner y la sesión
+  de repaso.
+
+### 16.3 Cierre completo + export a Obsidian + videos (§6.9-10, §11.5)
+
+- `GET /api/sesiones/[id]/cierre`: comparativa antes (dominados) / después (ejercicios
+  aprobados), feedback, recursos por sub-tema y conceptos a repasar.
+- `GET /api/sesiones/[id]/export`: `.md` con frontmatter, bloque `mermaid`, debilidades,
+  material con soluciones y tabla de repaso (`lib/exportar.ts`, función pura).
+- `lib/recursos.ts`: catálogo curado de 10 recursos (MDN / react.dev) + link de búsqueda como
+  fallback. **Nunca URLs generadas por el modelo** (§11.5).
+- `FaseCierre.tsx` reescrita; tests: `tests/cierre.test.ts` (8).
+
+### 16.4 Bug corregido de paso
+
+- `asegurarColumna` tolera la carrera de `next build`: varios workers importan `db.ts` en
+  paralelo y dos intentan `ADD COLUMN`; el error `duplicate column name` se ignora porque la
+  columna ya está (el build fallaba con `fragmento`).
+
+### 16.5 Lo que NO se hizo en esta tanda (y por qué)
+
+- **§12.3 ranuras + semántica de dominio** (`sabido_probable` / `dominado`): cambia la
+  semántica que verifican `.smoke-fase-cd.ps1` (36 asserts) y `ACIERTOS_SEGUIDOS_PARA_DOMINAR`.
+  No se tocó porque **no había modelo para re-correr los humos**: es la trampa de §10.1.
+- **§12.5 Preparando** y **§12.4/§12.6 Enseñar rediseñado** (roles, andamiaje, extractivo,
+  plantilla): idem, son cambios de prompt/flujo que necesitan medición con un modelo real.
+- **Partir `app/page.tsx`** y extraer `ModalAjustes`: sigue en 935 líneas (deuda §6.13).
+- **Set golden con reportes reales**: pendiente a pedido del usuario.
 
 ## 1. Estado por módulo
 
