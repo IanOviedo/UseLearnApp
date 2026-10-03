@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
     // ignoraba y siempre se llamaba al default hardcodeado. Queda guardado en la sesión.
     // El material se parte en bloques (ver `extraerSubtemas`) para que el final del
     // documento cuente: antes solo se miraba el head y salían pocos sub-temas.
-    const { subtemas, bloques } = await extraerSubtemas(textoFuente, modelo, proveedor, preset);
+    const { subtemas, bloques, fragmentos } = await extraerSubtemas(textoFuente, modelo, proveedor, preset);
 
     if (subtemas.length === 0) {
       return NextResponse.json(
@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
       );
     }
     const sesionId = crearSesion(topic, textoFuente, modelo, { modo, objetivo, nivel });
-    const subtemaIds = subtemas.map((nombre) => agregarSubtema(sesionId, nombre));
+    const subtemaIds = subtemas.map((nombre, i) => agregarSubtema(sesionId, nombre, fragmentos[i] ?? null));
 
     return NextResponse.json({
       sesionId,

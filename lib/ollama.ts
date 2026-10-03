@@ -610,6 +610,8 @@ async function mapearConLimite<T, R>(
 
 export interface ResultadoSubtemas {
   subtemas: string[]
+  /** Fragmento del material de cada sub-tema, en el mismo orden que `subtemas`. */
+  fragmentos: string[]
   /** Bloques en los que se analizó el texto (1 = entró completo en una sola pasada). */
   bloques: number
 }
@@ -629,7 +631,7 @@ export async function extraerSubtemas(
 ): Promise<ResultadoSubtemas> {
   const ajustes = ajustesDePreset(preset)
   const bloques = dividirEnBloques(texto, ajustes.subtemasBloqueChars, ajustes.subtemasMaxBloques)
-  if (bloques.length === 0) return { subtemas: [], bloques: 0 }
+  if (bloques.length === 0) return { subtemas: [], fragmentos: [], bloques: 0 }
 
   // Cuántos sub-temas "sostiene" el material: pedir 10 para 400 caracteres obliga al modelo
   // a inventar variantes del mismo concepto, que es la repetición que queremos evitar.
@@ -699,11 +701,18 @@ export async function extraerSubtemas(
   // elegir cuáles entran hay que repartir por bloque, o el corte se lleva siempre el final.
   const ordenados = ordenarPorAparicion(unicos, texto, (candidato) => candidato.nombre)
   const seleccionados = repartirPorCuota(ordenados, (candidato) => candidato.bloque, ajustes.maxSubtemas)
-  const subtemas = ordenarPorAparicion(
+  const seleccionFinal = ordenarPorAparicion(
     seleccionados,
     texto,
     (candidato) => candidato.nombre
-  ).map((candidato) => candidato.nombre)
+  )
+  const subtemas = seleccionFinal.map((candidato) => candidato.nombre)
+  // El fragmento se guarda con el sub-tema (subtemas.fragmento): preguntas y material lo
+  // reutilizan en vez de volver a buscar el nombre en el texto completo. Con material largo el
+  // nombre muchas veces no aparece literal y `extraerExcerpt` caía al head del documento.
+  const fragmentos = seleccionFinal.map((candidato) =>
+    extraerExcerpt(bloques[candidato.bloque] ?? texto, candidato.nombre, ajustes.excerptMaxChars)
+  )
 
   // Diagnóstico honesto: material largo con pocos sub-temas significa que hay que mirarlo.
   if (bloques.length > 1 && subtemas.length < Math.min(5, ajustes.maxSubtemas)) {
@@ -733,7 +742,7 @@ export async function extraerSubtemas(
     )
   }
 
-  return { subtemas, bloques: bloques.length }
+  return { subtemas, fragmentos, bloques: bloques.length }
 }
 
 // --- Fase C1: apunte sintético (modalidad "tema libre") ----------------------

@@ -6,7 +6,7 @@
  * - `apunte`: el usuario pegó su propio texto (fidelidad estricta a ese texto).
  * - `tema_libre`: el usuario escribió un tema y la app genera el apunte de estudio.
  */
-export type ModoSesion = "apunte" | "tema_libre";
+export type ModoSesion = "apunte" | "tema_libre" | "repaso";
 
 /** Nivel que guía la profundidad del apunte sintético (modalidad tema libre). */
 export type NivelSesion = "basico" | "intermedio" | "avanzado";
@@ -101,6 +101,12 @@ export interface Pregunta {
 export interface SubtemaEstado {
   id: number;
   nombre: string;
+  /**
+   * Fragmento del material donde apareció el sub-tema (lo guarda la creación de la sesión).
+   * Preguntas y material lo reutilizan para no volver a buscar el nombre en el texto completo,
+   * que con textos largos suele fallar y cae al head del documento.
+   */
+  fragmento: string | null;
   aciertosSeguidos: number;
   intentos: number;
   correctas: number;

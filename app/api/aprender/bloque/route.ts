@@ -94,7 +94,7 @@ export async function POST(request: NextRequest) {
         faltanExplicaciones
           ? generarExplicaciones({
               subtema: subtema.nombre,
-              textoOriginal: sesion.textoOriginal,
+              textoOriginal: subtema.fragmento ?? sesion.textoOriginal,
               ruta,
               errores,
               modelo,
@@ -104,7 +104,7 @@ export async function POST(request: NextRequest) {
         faltanEjercicios
           ? generarEjercicios({
               subtema: subtema.nombre,
-              textoOriginal: sesion.textoOriginal,
+              textoOriginal: subtema.fragmento ?? sesion.textoOriginal,
               modo: sesion.modo === "tema_libre" ? "tema_libre" : "apunte",
               // Anti-repetición: TODOS los ejercicios ya generados en la sesión, excluyendo los
               // del propio sub-tema (sus variantes js/jsx comparten enunciado a propósito).

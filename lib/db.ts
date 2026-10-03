@@ -155,6 +155,8 @@ db.exec(`CREATE TABLE IF NOT EXISTS reportes_pregunta (
 // quedaba pendiente en el sidebar para siempre, sin forma de volver a marcarlo ni de distinguir
 // "no lo vi" de "lo vi y lo salteé". El dominio NO se toca: saltar no aprueba nada.
 asegurarColumna("subtemas", "saltado", "INTEGER NOT NULL DEFAULT 0");
+// Cobertura (Tanda 1): fragmento del material donde apareció cada sub-tema.
+asegurarColumna("subtemas", "fragmento", "TEXT");
 
 // --- Feedback de calidad de ejercicios (ítem 15, fase Enseñar) ---------------
 // Misma idea que `reportes_pregunta` pero sobre la fase de práctica: el enunciado no dice qué
@@ -272,7 +274,8 @@ function obtenerSesion(sesionId: number): Sesion | null {
     creadaEn: row.creada_en,
     feedbackFinal: row.feedback_final,
     // Sesiones antiguas creadas antes de la migración quedan con 'apunte' (el DEFAULT).
-    modo: row.modo === "tema_libre" ? "tema_libre" : "apunte",
+    // Se devuelve el modo crudo: además de apunte/tema_libre existe "repaso" (memoria).
+    modo: row.modo || "apunte",
     objetivo: row.objetivo,
     nivel: row.nivel,
   };
@@ -574,8 +577,10 @@ function obtenerReportes(sesionId: number): {
 
 // --- Sub-temas --------------------------------------------------------------
 
-function agregarSubtema(sesionId: number, nombre: string): number {
-  const result = db.prepare("INSERT INTO subtemas (sesion_id, nombre) VALUES (?, ?)").run(sesionId, nombre);
+function agregarSubtema(sesionId: number, nombre: string, fragmento: string | null = null): number {
+  const result = db
+    .prepare("INSERT INTO subtemas (sesion_id, nombre, fragmento) VALUES (?, ?, ?)")
+    .run(sesionId, nombre, fragmento);
   return Number(result.lastInsertRowid);
 }
 
@@ -640,7 +645,7 @@ function obtenerSubtemas(sesionId: number): SubtemaEstado[] {
   const filas = db
     .prepare(
       `SELECT id, nombre, aciertos_seguidos, cubierto, total_correctas, total_intentos,
-              total_incorrectas, saltado
+              total_incorrectas, saltado, fragmento
          FROM subtemas WHERE sesion_id = ? ORDER BY id`
     )
     .all(sesionId) as {
@@ -652,11 +657,13 @@ function obtenerSubtemas(sesionId: number): SubtemaEstado[] {
       total_intentos: number;
       total_incorrectas: number;
       saltado: number;
+      fragmento: string | null;
     }[];
 
   return filas.map((fila) => ({
     id: fila.id,
     nombre: fila.nombre,
+    fragmento: fila.fragmento ?? null,
     aciertosSeguidos: fila.aciertos_seguidos,
     intentos: fila.total_intentos,
     correctas: fila.total_correctas,

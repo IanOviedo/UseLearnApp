@@ -121,7 +121,7 @@ export async function servirSiguiente(args: {
   const previas = obtenerEnunciadosSesion(args.sesionId);
   const lote = await generarLotePreguntas(
     subtema.nombre,
-    sesion.textoOriginal,
+    subtema.fragmento ?? sesion.textoOriginal,
     args.modeloPreguntas,
     args.proveedorPreguntas,
     previas,
@@ -184,7 +184,7 @@ export function lanzarPregenSiConviene(args: {
     // pasa por el juez es la de `servirSiguiente`, en foreground.
     const lote = await generarLotePreguntas(
       siguiente.nombre,
-      sesion.textoOriginal,
+      siguiente.fragmento ?? sesion.textoOriginal,
       args.modeloPreguntas,
       args.proveedorPreguntas,
       previas,
