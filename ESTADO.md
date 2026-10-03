@@ -125,8 +125,28 @@ Esta pasada cierra §12.2 (el resto de (g)), §11.2-11.4 (memoria + repaso + pro
   No se tocó porque **no había modelo para re-correr los humos**: es la trampa de §10.1.
 - **§12.5 Preparando** y **§12.4/§12.6 Enseñar rediseñado** (roles, andamiaje, extractivo,
   plantilla): idem, son cambios de prompt/flujo que necesitan medición con un modelo real.
-- **Partir `app/page.tsx`** y extraer `ModalAjustes`: sigue en 935 líneas (deuda §6.13).
 - **Set golden con reportes reales**: pendiente a pedido del usuario.
+  *(Lo de partir `app/page.tsx` se hizo igual, ver §16.7.)*
+
+### 16.7 Deuda §6.13: `app/page.tsx` partido (935 → 691 líneas)
+
+- `components/ajustes/ModalAjustes.tsx` (310 líneas) se llevó el modal completo: lista de modelos
+  de Ollama (el fetch a `/api/modelos/listar` ahora corre al montar el modal), modelo de preguntas
+  del sondeo, pre-generación de lotes y el formulario de proveedores de nube.
+- **Frontera:** al modal entran por props `modeloPrincipal` y `proveedores` (lo que la página
+  necesita para crear la sesión) con `onModeloPrincipal`/`onProveedores` para notificar los
+  cambios; el resto del estado (modelos disponibles, `pregen`, campos del form) es interno.
+  El estado y los handlers que se fueron con el modal se borraron de `page.tsx`.
+- **Verificación del movimiento (no alcanza con que compile):** un script de auditoría comparó
+  el JSX extraído contra el bloque original de `git show HEAD:app/page.tsx`: **idéntico salvo
+  los 4 reemplazos declarados** (dedent + `onCerrar`/`onModeloPrincipal`/`onProveedores`).
+  Esa auditoría encontró un bug real que `tsc` y `eslint` **no** pueden ver: el primer pego
+  dejó `onClick={() => onCerrar}`, que devuelve la función sin invocarla (el modal no se cerraba
+  ni apretando Escape/click fuera). Corregido a `onClick={onCerrar}`.
+- Verificación final: `npm run verify` (111/111), `npm run build` y smoke de la landing.
+- **Lo que queda de la deuda:** el archivo sigue en **691 líneas** (el modal de sesiones y el
+  cuerpo de la landing son los próximos cortes). El tamaño importa por §12.8: el harness se
+  rompe con ediciones parciales de archivos grandes.
 
 ## 1. Estado por módulo
 
@@ -343,14 +363,15 @@ al filtro de calidad:
 12. Import desde la carpeta de notas con `fs` (solo lectura, whitelist).
 
 **Deuda técnica**
-13. Extraer `ModalAjustes` de `app/page.tsx`. **Creció dos veces:** el texto decía 645 líneas;
-    después 886; hoy son **935** (contadas en esta pasada). El modal ya no es el único problema del
-    archivo, y el tamaño importa por una razón práctica (§12.8): el harness se rompe con ediciones
-    parciales de archivos grandes.
+13. ~~Extraer `ModalAjustes` de `app/page.tsx`~~ **✅ hecho en la Tanda 4 (§16.7):** el modal
+    vive ahora en `components/ajustes/ModalAjustes.tsx` y `page.tsx` bajó de **935 a 691**
+    líneas. El tamaño importa por una razón práctica (§12.8): el harness se rompe con ediciones
+    parciales de archivos grandes. **Sigue abierta la parte restante:** partir el resto del
+    archivo (691 líneas) y extraer también el modal de sesiones.
 14. Tests automatizados — **51 tests con `vitest`** (`lib/texto.ts`, `lib/db.ts` y el fail-open del
     juez). Scripts: `npm test`, `npm run typecheck`, `npm run check:callers` y **`npm run verify`**
-    (los cuatro encadenados). **Lo que falta:** tests de `lib/validacion.ts`, de los payloads de
-    `servirSiguiente`, el set golden del juez y partir `app/page.tsx`. Ver §13.
+    (los cuatro encadenados). **Lo que falta:** los payloads de `servirSiguiente`, el set golden
+    del juez y partir el resto de `app/page.tsx`. Ver §13.
 15. ~~Botón "esta pregunta está mal"~~ **✅ hecho (§13.9), corregido y extendido a los ejercicios de
     Enseñar (§15).** Botón en el sondeo (6 motivos) y en cada card de práctica (8 motivos), con
     tablas `reportes_pregunta` y `reportes_ejercicio`. **Lo que falta:** alimentar el set golden
@@ -985,8 +1006,9 @@ El historial de confusiones por concepto no necesita tabla nueva: se consulta de
 - **Matiz a §11.7:** probar con el modelo más chico vale para el plumbing. La **calibración del juez** se hace
   con el modelo que realmente se usará como juez, y el juez **no debe ser el mismo modelo que generó** la
   pregunta.
-- **Partir `app/page.tsx`** (935 líneas, §6 ítem 13): además de deuda técnica, el tamaño del archivo está
-  ligado a que el harness rompa las ediciones parciales.
+- **Partir `app/page.tsx`** (§6 ítem 13): además de deuda técnica, el tamaño del archivo está
+  ligado a que el harness rompa las ediciones parciales. *(`ModalAjustes` ya se extrajo en
+  §16.7; el archivo quedó en 691 líneas y sigue siendo largo.)*
 
 ### 12.9 Orden vigente y cómo se verifica cada paso
 
@@ -1112,7 +1134,8 @@ par de commits que nadie lo corrió. Es el mismo modo de falla de §10.1.
   de payloads siguen dependiendo de verificación manual.
 - **No hay `npm run verify`**: typecheck, lint y tests se corren por separado, así que es posible
   commitear con uno en rojo (como pasó con el lint). *(Resuelto en la segunda tanda, §13.5.)*
-- **`page.tsx` sigue en 935 líneas** y `ModalAjustes` sin extraer.
+- **`page.tsx` sigue largo**: bajó a **691 líneas** con `ModalAjustes` extraído (§16.7), pero el
+  resto del archivo sigue de un tirón.
 - **El reparto está verificado con un corpus y un modelo.** El test fija la lógica, no que el modelo
   detecte bien los conceptos: eso sigue siendo cuestión de prompt, no de código.
 
@@ -1190,8 +1213,9 @@ espiar exports de ESM no es confiable; interceptar la red cubre la cadena real.
 - **La calibración del juez sigue sin medirse** (§10.5): los asserts fijan que el *comportamiento* es
   el correcto con un juez falso, no que el juez real rechace lo justo. Eso necesita el set golden
   (§12.8) y correrlo con el modelo que se vaya a usar.
-- **`lib/validacion.ts` y `lib/sondeo.ts` sin tests.**
-- **`page.tsx` sigue en 935 líneas** y `ModalAjustes` sin extraer.
+- ~~**`lib/validacion.ts` y `lib/sondeo.ts` sin tests.**~~ `lib/validacion.ts` cerró con **12 tests**
+  en la Tanda 4; sigue faltando `lib/sondeo.ts`.
+- **`page.tsx` sigue en 691 líneas** (con `ModalAjustes` extraído en §16.7; falta partir el resto).
 - ⏸ **Set golden con reportes reales**: pendiente a pedido explícito del usuario. Ver §15.
 
 ### 13.9 El botón "esta pregunta está mal" (ítem 15, cerrado)
@@ -1252,8 +1276,8 @@ historial no cambió y que el sub-tema sigue con 0 intentos.
 | 0. Probar el juez con modelo real | ✅ **medido (30/09, §14.3)**: recall 67% y **0 falsos positivos** con `gemma4:e2b`. Sigue con un punto ciego conocido (ambigüedad) |
 | 0b. Asserts del fail-open | ✅ cerrado (§13.6) |
 | 15. Botón "pregunta mala" | ✅ cerrado (§13.9) |
-| 14. Tests | 🟡 60 tests; faltan `validacion.ts` y los payloads de `servirSiguiente` |
-| 13. Partir `page.tsx` | ❌ sigue abierto (935 líneas) |
+| 14. Tests | 🟢 **111 tests**; `validacion.ts` cerrado (Tanda 4). Faltan los payloads de `servirSiguiente` |
+| 13. Partir `page.tsx` | 🟡 **parcial (§16.7)**: `ModalAjustes` extraído, 935 → 691 líneas. Falta partir el resto |
 | 4. Regla de dominio | ❌ sigue abierto (Paso 3) |
 
 ## 14. Calibración del juez: primera medición real (30/09/2026)
