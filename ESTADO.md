@@ -42,10 +42,10 @@ Base de la verificación (HEAD `ff7007e`, con `8a4744a` adentro):
 
 Esta pasada cierra §12.2 (el resto de (g)), §11.2-11.4 (memoria + repaso + progreso),
 §6 ítems 9-10-11 (cierre, export, mezcla) y §11.5 (videos), más los tests que faltaban de
-`lib/validacion.ts`. **No toca la semántica de dominio** (ver §16.5).
+`lib/validacion.ts`. **No toca la semántica de dominio** (ver §16.6).
 
 > **Verificación de esta tanda:** `npm run verify` (typecheck + lint + tests + callers),
-> `npm test` (**108/108** en 7 archivos) y `npm run build` (todas las rutas nuevas compilan).
+> `npm test` (**111/111** en 8 archivos) y `npm run build` (todas las rutas nuevas compilan).
 > **Ollama no estaba corriendo**, así que no se pudo re-correr ningún humo end-to-end ni medir
 > latencia/calidad: lo de abajo está verificado por compilación, tests unitarios y lectura de
 > código, **no** por ejecución contra un modelo.
@@ -75,7 +75,7 @@ Esta pasada cierra §12.2 (el resto de (g)), §11.2-11.4 (memoria + repaso + pro
   reusando su fragmento original), `GET /api/progreso` y página `/progreso`. La landing
   muestra **"Te tocan N conceptos"** con un botón para repasar.
 - Tests: `tests/memoria.test.ts` (7) fijan el vínculo entre sesiones, el Leitner y la sesión
-  de repaso.
+  de repaso; `tests/backfill.test.ts` (3) el backfill del historial viejo (§16.5).
 
 ### 16.3 Cierre completo + export a Obsidian + videos (§6.9-10, §11.5)
 
@@ -93,7 +93,32 @@ Esta pasada cierra §12.2 (el resto de (g)), §11.2-11.4 (memoria + repaso + pro
   paralelo y dos intentan `ADD COLUMN`; el error `duplicate column name` se ignora porque la
   columna ya está (el build fallaba con `fragmento`).
 
-### 16.5 Lo que NO se hizo en esta tanda (y por qué)
+### 16.5 Backfill: el historial viejo hereda la memoria
+
+- **Hallazgo al validar en vivo (no en tests):** con la DB real, `GET /api/progreso` devolvía
+  `{"total":0}`: **108 sub-temas de las sesiones 1-68 y 0 conceptos**. `concepto_id` se llena
+  solo en `agregarSubtema`, así que las filas antiguas quedaron sin vínculo y la "memoria
+  entre sesiones" no existía para nada de lo ya estudiado. *Lección recurrente de §10.1: un
+  build verde y 100 tests no prueban que la feature esté conectada a datos reales.*
+- `backfillConceptos()` (en `lib/db.ts`, corre al cargar el módulo) linkea los sub-temas sin
+  concepto, reconstituye los contadores desde el historial real (`subtemas.total_*` del
+  sondeo + `intentos_ejercicio` de la práctica, que son exactamente las fuentes que alimenta
+  `registrarResultadoConcepto` en vivo) y programa el repaso de ese historial **para hoy**.
+  Idempotente: sin pendientes no hace nada.
+- `.immediate()` + `try/catch` a propósito: `next build` importa `db.ts` en varios workers en
+  paralelo; con un BEGIN diferido dos procesos podrían leer los mismos pendientes y duplicar
+  contadores o chocar con el `UNIQUE` de `nombre_normalizado`. Si pierde la carrera queda para
+  el próximo arranque en vez de romper el build.
+- **También en esta subsección:** `resolverConcepto` programa `proximo_repaso = now + 1 día`
+  al crear un concepto (caja 1). Antes quedaba `NULL` hasta la primera respuesta, y un
+  concepto visto pero nunca respondido **nunca** aparecía como vencido.
+- **Verificado en vivo:** `next build` corrió el backfill sobre la DB real → **75 conceptos /
+  0 sin vínculo / 75 vencidos**, con `primera_vez` de sesiones de septiembre; después,
+  `GET /api/progreso` y `GET /api/repaso` responden 200 con esos datos.
+- Tests: `tests/backfill.test.ts` (3) siembran sub-temas legacy a mano y fijan linkeo,
+  contadores reconstruidos e idempotencia.
+
+### 16.6 Lo que NO se hizo en esta tanda (y por qué)
 
 - **§12.3 ranuras + semántica de dominio** (`sabido_probable` / `dominado`): cambia la
   semántica que verifican `.smoke-fase-cd.ps1` (36 asserts) y `ACIERTOS_SEGUIDOS_PARA_DOMINAR`.
@@ -108,13 +133,14 @@ Esta pasada cierra §12.2 (el resto de (g)), §11.2-11.4 (memoria + repaso + pro
 | Módulo | Archivos | Estado verificado |
 |---|---|---|
 | Ingesta | `app/page.tsx`, `app/api/archivos/extraer-pdf`, `lib/texto.ts` | Texto/md pegado + PDF. El `topic` ya no es `slice(0,50)`: `derivarTema()` saltea encabezados y nombres de archivo (en la base se lee "Challenge: Date Counter (Step + Count + fecha dinámica)"). Falta solo el export a Obsidian y el import de notas (Fase E). Con C1 hay modalidades de entrada (apunte pegado/PDF o tema libre con nivel + objetivo) y confirmación de sub-temas: la landing muestra lo detectado y podés desmarcar lo que no te interesa antes de que arranque el sondeo. |
-| Sub-temas | `lib/ollama.ts::extraerSubtemas`, `lib/texto.ts::dividirEnBloques`, `lib/config.ts::PRESETS_CALIDAD` | Usa el modelo y el proveedor elegidos en Ajustes. **Desde `8a4744a` (Tanda 1) la extracción ya NO manda un head fijo:** parte el texto en bloques (`dividirEnBloques`, con solape de 300 chars) y hace **una llamada por bloque** con concurrencia 2, con un objetivo por bloque acotado por material (`CHARS_POR_SUBTEMA = 700`). Si los bloques no alcanzan el objetivo del preset, corre una **pasada de cobertura** sobre inicio+final (`fuenteParaCobertura`) pidiendo conceptos que no estén ya detectados. Deduplica por similitud y ordena por aparición en el texto. Los tres presets (`rapido`/`equilibrado`/`profundo`) fijan `maxSubtemas` = 6/10/12. **Pendiente:** la columna `subtemas.fragmento` (§12.2). |
+| Sub-temas | `lib/ollama.ts::extraerSubtemas`, `lib/texto.ts::dividirEnBloques`, `lib/config.ts::PRESETS_CALIDAD` | Usa el modelo y el proveedor elegidos en Ajustes. **Desde `8a4744a` (Tanda 1) la extracción ya NO manda un head fijo:** parte el texto en bloques (`dividirEnBloques`, con solape de 300 chars) y hace **una llamada por bloque** con concurrencia 2, con un objetivo por bloque acotado por material (`CHARS_POR_SUBTEMA = 700`). Si los bloques no alcanzan el objetivo del preset, corre una **pasada de cobertura** sobre inicio+final (`fuenteParaCobertura`) pidiendo conceptos que no estén ya detectados. Deduplica por similitud y ordena por aparición en el texto. Los tres presets (`rapido`/`equilibrado`/`profundo`) fijan `maxSubtemas` = 6/10/12. La columna `subtemas.fragmento` **ya está** desde la Tanda 4 (§16.1): preguntas y material usan el bloque de origen. |
 | Sondeo | `lib/sondeo.ts`, `app/api/sondeo/*`, `FaseSondeo.tsx` | Un roundtrip por pregunta (merge), caché de lote en memoria, atajos 1-4/Enter, fila respondida compacta memoizada, reanudable al recargar. **Desde 30/09 las preguntas pasan por dos filtros de calidad antes de servirse** (ver §10). Desde `8a4744a` el presupuesto del sondeo es **dinámico** (`maxPreguntasSesion(n)` = 4×n sub-temas, entre 24 y 60) y hay un paso previo de "ángulos" para que las preguntas del lote no repitan enfoque. |
 | Dominio | `lib/db.ts::registrarRespuesta` | Contadores reales (`total_correctas/total_intentos/total_incorrectas`), dominado = 2 aciertos seguidos, `descartada` para lotes abandonados, y la tabla `respuestas` **sí se llena** con la opción elegida. |
 | Estado de sesión | `GET /api/sesiones/[id]`, `lib/tipos.ts` | Fase, progreso, sub-temas con dominio, débiles, sin dominar e historial completo. `sesiones.fase_actual` se persiste (`sondeo` → `plan`). |
 | Plan | `FasePlan.tsx`, `app/api/sesiones/[id]/fase` | Server-driven (reabrir una sesión pasada ya no lo muestra vacío), lista de débiles, lista de "quedaron sin dominar", mapa Mermaid y el paso a Enseñar: la fase se persiste en la base con guard de retroceso. |
 | Enseñar | `lib/aprender.ts`, `lib/practica.ts`, `app/api/aprender/*`, `components/aprender/*` | Ruta por sub-tema (`reforzar`/`asegurar`/`practicar`/`sin_evaluar`), material generado y cacheado por sub-tema (explicaciones + ejercicios), quiz y ejercicios de código con `assertions`, runner en `iframe sandbox`, aprobados persistidos. |
-| Cerrar | `components/sondeo/FaseCierre.tsx`, `POST /api/sesiones/[id]/fase` | Pantalla mínima (stepper + feedback + salir); la comparativa, la mezcla de preguntas y el export quedan en Fase E. |
+| Cerrar | `components/sondeo/FaseCierre.tsx`, `GET /api/sesiones/[id]/cierre`, `GET /api/sesiones/[id]/export`, `lib/exportar.ts`, `lib/recursos.ts` | **Hecho en la Tanda 4 (§16.3):** comparativa antes/después, feedback, recursos por sub-tema (catálogo MDN/react.dev + búsqueda, nunca URLs del modelo) y export `.md` a Obsidian con frontmatter, mermaid y tabla de repaso. |
+| Memoria y repaso | `lib/db.ts` (tabla `conceptos` + `backfillConceptos`), `app/api/repaso/*`, `app/api/progreso`, `app/progreso`, `components/repaso/TarjetaRepaso.tsx` | **Hecho en la Tanda 4 (§16.2/§16.5):** conceptos que sobreviven entre sesiones (dedup determinista, sin LLM), Leitner 1/3/7 días actualizado al responder y al aprobar ejercicios, sesión `modo: "repaso"` que reusa el fragmento original, página `/progreso` y "Te tocan N conceptos" en la landing. El historial viejo se heredó con backfill: **75 conceptos / 75 vencidos** en la DB real. Falta la dedup semántica con embeddings (§12.6). |
 | Transversal | `lib/config.ts`, `lib/db.ts`, `lib/proveedores.ts` | Gateway único de modelos, defaults centralizados, WAL + `foreign_keys` + índices + ruta absoluta de DB, CRUD de proveedores OpenAI-compatible, filtro de modelos de embeddings. |
 
 ## 2. Comparación con la auditoría previa (15 hallazgos)
@@ -808,10 +834,10 @@ Los 10 sub-temas finales salen en orden de lectura y el último de la lista es d
 del final del documento. La corrida contra Ollama se hizo con un script temporal ya borrado; lo que
 queda en el repo son los tests, que fijan el comportamiento sin depender del modelo.
 
-**Lo que sigue pendiente de esta sección es una sola cosa:** `subtemas.fragmento` + usarla en
-preguntas y material (que también es el prerrequisito de §12.3). La partición sin IA, la
-sub-tema-por-módulo, el dedup, la cobertura, el presupuesto **y el reparto del corte final ya
-están.**
+**Estado de esta sección (02/10):** `subtemas.fragmento` **ya está** (§16.1): preguntas y material
+usan el bloque de origen. La partición sin IA, la sub-tema-por-módulo, el dedup, la cobertura, el
+presupuesto **y el reparto del corte final** también. Lo único que sigue acá es §12.3 (ranuras +
+semántica de dominio), que necesita modelo para medirse.
 
 ### 12.3 Preguntas: menos, mejores y sin repetición (e, f, i)
 

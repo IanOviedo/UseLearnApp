@@ -644,8 +644,12 @@ function resolverConcepto(nombre: string): number {
   }
   if (mejor) return mejor.id;
 
+  // Primer repaso programado al nacer (caja 1 = 1 día). Si quedaba NULL, un concepto visto
+  // pero nunca respondido jamás aparecía como vencido y el repaso no lo ofrecía nunca.
   const result = db
-    .prepare("INSERT INTO conceptos (nombre, nombre_normalizado) VALUES (?, ?)")
+    .prepare(
+      "INSERT INTO conceptos (nombre, nombre_normalizado, proximo_repaso) VALUES (?, ?, datetime('now', '+1 day'))"
+    )
     .run(nombre.trim(), clave);
   return Number(result.lastInsertRowid);
 }
@@ -715,6 +719,103 @@ const agregarSubtema = db.transaction(
     return Number(result.lastInsertRowid);
   }
 );
+
+/**
+ * Backfill de la memoria: los sub-temas anteriores a la columna `concepto_id` quedaron sin
+ * vínculo, así que la app veía 0 conceptos con 108 sub-temas de sesiones reales (la memoria
+ * "entre sesiones" no existía para el historial ya estudiado).
+ *
+ * Se rehace acá el mismo vínculo que hace `agregarSubtema`, se suman los contadores desde el
+ * historial real (`subtemas.total_*` del sondeo + `intentos_ejercicio` de la práctica, que son
+ * exactamente las fuentes que alimenta `registrarResultadoConcepto` en vivo) y se programa el
+ * primer repaso: no sabemos si el usuario lo sabe, así que hay que preguntarle.
+ *
+ * Idempotente: solo toca sub-temas con `concepto_id IS NULL`, y una vez linkeados no vuelven a
+ * contar, así que correrlo en cada arranque es seguro (y no hacer nada si no hay nada).
+ */
+const backfillConceptos = db.transaction((): number => {
+  const pendientes = db
+    .prepare("SELECT id, nombre FROM subtemas WHERE concepto_id IS NULL ORDER BY id")
+    .all() as { id: number; nombre: string }[];
+  if (pendientes.length === 0) return 0;
+
+  const previos = new Set(
+    (db.prepare("SELECT id FROM conceptos").all() as { id: number }[]).map((fila) => fila.id)
+  );
+  const vincular = db.prepare("UPDATE subtemas SET concepto_id = ? WHERE id = ?");
+  const vistos = new Map<number, number>();
+  const nuevos: number[] = [];
+  for (const subtema of pendientes) {
+    const conceptoId = resolverConcepto(subtema.nombre);
+    vincular.run(conceptoId, subtema.id);
+    vistos.set(conceptoId, (vistos.get(conceptoId) ?? 0) + 1);
+    if (!previos.has(conceptoId)) nuevos.push(conceptoId);
+  }
+
+  for (const [conceptoId, cantidad] of vistos) {
+    db.prepare(
+      "UPDATE conceptos SET veces_visto = veces_visto + ?, ultima_vez = CURRENT_TIMESTAMP WHERE id = ?"
+    ).run(cantidad, conceptoId);
+  }
+
+  // Contadores y fechas: solo para los conceptos creados en esta corrida. Los que ya existían
+  // los mantiene `registrarResultadoConcepto` en vivo y recalcularlos acá podría pisarlos.
+  // El repaso se programa para HOY: es historial viejo y todavía nadie lo repasó con este
+  // sistema, así que lo correcto es preguntarle de una.
+  for (const conceptoId of nuevos) {
+    const historial = db
+      .prepare(
+        `SELECT COALESCE(SUM(s.total_correctas), 0) AS aciertos,
+                COALESCE(SUM(s.total_incorrectas), 0) AS fallos,
+                MIN(ses.creada_en) AS primera,
+                MAX(ses.creada_en) AS ultima
+           FROM subtemas s JOIN sesiones ses ON ses.id = s.sesion_id
+          WHERE s.concepto_id = ?`
+      )
+      .get(conceptoId) as { aciertos: number; fallos: number; primera: string | null; ultima: string | null };
+    const practica = db
+      .prepare(
+        `SELECT COALESCE(SUM(CASE WHEN i.aprobado = 1 THEN 1 ELSE 0 END), 0) AS aciertos,
+                COALESCE(SUM(CASE WHEN i.aprobado = 0 THEN 1 ELSE 0 END), 0) AS fallos
+           FROM ejercicios e JOIN intentos_ejercicio i ON i.ejercicio_id = e.id
+          WHERE e.subtema_id IN (SELECT id FROM subtemas WHERE concepto_id = ?)`
+      )
+      .get(conceptoId) as { aciertos: number; fallos: number };
+
+    db.prepare(
+      `UPDATE conceptos SET
+         veces_acierto = ?,
+         veces_fallo = ?,
+         proximo_repaso = datetime('now'),
+         primera_vez = COALESCE(?, primera_vez),
+         ultima_vez = COALESCE(?, ultima_vez)
+       WHERE id = ?`
+    ).run(
+      historial.aciertos + practica.aciertos,
+      historial.fallos + practica.fallos,
+      historial.primera,
+      historial.ultima,
+      conceptoId
+    );
+  }
+
+  return pendientes.length;
+});
+
+// Arranque: hereda el historial viejo sin intervención del usuario. 0 pendientes = no-op.
+// `.immediate()` a propósito: `next build` importa este módulo en varios workers en paralelo y
+// con un BEGIN diferido dos procesos podrían leer los mismos pendientes, duplicar contadores o
+// chocar con el UNIQUE de `nombre_normalizado`. Con el lock tomado antes de leer, el segundo ve
+// el trabajo hecho y no hace nada. Si aun así pierde la carrera, el catch lo deja para el
+// próximo arranque en lugar de romper el build.
+try {
+  backfillConceptos.immediate();
+} catch (error) {
+  console.warn(
+    "[db] backfill de conceptos diferido al próximo arranque:",
+    error instanceof Error ? error.message : error
+  );
+}
 
 type FilaConcepto = Parameters<typeof filaAConcepto>[0];
 
@@ -1555,6 +1656,8 @@ export {
   contarConceptos,
   obtenerConceptosDeSesion,
   crearSesionRepaso,
+  /** Backfill idempotente del historial viejo (se ejecuta solo al arrancar). */
+  backfillConceptos,
   obtenerSubtemas,
   /** Saltar/des-saltar un sub-tema sin tocar el dominio. */
   marcarSubtemaSaltado,
