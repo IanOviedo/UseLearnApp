@@ -51,7 +51,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
       fase: (FASES as string[]).includes(sesion.faseActual)
         ? (sesion.faseActual as EstadoSesion["fase"])
         : "sondeo",
-      modo: sesion.modo === "tema_libre" ? "tema_libre" : "apunte",
+      modo: sesion.modo === "tema_libre" ? "tema_libre" : sesion.modo === "repaso" ? "repaso" : "apunte",
       objetivo: sesion.objetivo,
       modelo: sesion.modelo,
       creadaEn: sesion.creadaEn,

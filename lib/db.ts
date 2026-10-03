@@ -1,9 +1,10 @@
 import path from "node:path";
 import Database from "better-sqlite3";
-import { ACIERTOS_SEGUIDOS_PARA_DOMINAR } from "./config";
-import { normalizarTexto } from "./texto";
+import { ACIERTOS_SEGUIDOS_PARA_DOMINAR, DIAS_POR_CAJA } from "./config";
+import { normalizarParaSimilitud, normalizarTexto, similitudTokens } from "./texto";
 import type {
   AssertionEjercicio,
+  ConceptoEstado,
   ConteoAprendizaje,
   Ejercicio,
   Explicacion,
@@ -175,6 +176,31 @@ db.exec(`CREATE TABLE IF NOT EXISTS reportes_ejercicio (
   creada_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 )`);
 
+// --- Memoria entre sesiones (conceptos) --------------------------------------
+// Un "concepto" sobrevive entre sesiones: "Closures" en la sesión 1 y "Closures" en la
+// 8 apuntan a la MISMA fila. Es lo que permite que la app recuerde y programe repasos.
+// La deduplicación es determinista (nombre normalizado exacto + similitud conservadora),
+// a propósito: un error silencioso del modelo sería peor que un error visible y corregible.
+db.exec(`CREATE TABLE IF NOT EXISTS conceptos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  nombre TEXT NOT NULL,
+  nombre_normalizado TEXT NOT NULL UNIQUE,
+  veces_visto INTEGER NOT NULL DEFAULT 0,
+  veces_acierto INTEGER NOT NULL DEFAULT 0,
+  veces_fallo INTEGER NOT NULL DEFAULT 0,
+  ultimo_resultado INTEGER,
+  caja INTEGER NOT NULL DEFAULT 1,
+  proximo_repaso TEXT,
+  primera_vez TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  ultima_vez TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+)`);
+
+// Vínculo subtema → concepto. Es la columna que une cada fila de una sesión con la
+// memoria global; se llena sola en `agregarSubtema` (único punto de escritura).
+asegurarColumna("subtemas", "concepto_id", "INTEGER REFERENCES conceptos(id)");
+
+db.exec("CREATE INDEX IF NOT EXISTS idx_conceptos_repaso ON conceptos(proximo_repaso)");
+db.exec("CREATE INDEX IF NOT EXISTS idx_subtemas_concepto ON subtemas(concepto_id)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_preguntas_subtema ON preguntas(subtema_id, respondida)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_preguntas_sesion ON preguntas(sesion_id, descartada)");
 db.exec("CREATE INDEX IF NOT EXISTS idx_subtemas_sesion ON subtemas(sesion_id)");
@@ -577,12 +603,203 @@ function obtenerReportes(sesionId: number): {
 
 // --- Sub-temas --------------------------------------------------------------
 
-function agregarSubtema(sesionId: number, nombre: string, fragmento: string | null = null): number {
+// --- Conceptos (memoria entre sesiones) ---------------------------------------
+
+/** Clave estable para reconocer el mismo concepto entre sesiones. Sin LLM. */
+function claveConcepto(nombre: string): string {
+  return normalizarParaSimilitud(nombre) || normalizarTexto(nombre);
+}
+
+/**
+ * Resuelve el concepto de un sub-tema, con dos pasadas deterministas:
+ * 1. nombre normalizado exacto (barato y cubre la mayoría de los casos reales);
+ * 2. similitud de tokens muy conservadora (≥ 0.85), para absorber diferencias de
+ *    puntuación o plural sin fusionar conceptos vecinos por error.
+ * Lo que queda afuera crea un concepto nuevo: preferimos un duplicado visible a una
+ * fusión silenciosa y equivocada.
+ */
+function resolverConcepto(nombre: string): number {
+  const clave = claveConcepto(nombre);
+  const exacto = db
+    .prepare("SELECT id FROM conceptos WHERE nombre_normalizado = ?")
+    .get(clave) as { id: number } | undefined;
+  if (exacto) return exacto.id;
+
+  const existentes = db.prepare("SELECT id, nombre FROM conceptos").all() as {
+    id: number;
+    nombre: string;
+  }[];
+  let mejor: { id: number; similitud: number } | null = null;
+  for (const candidato of existentes) {
+    const similitud = similitudTokens(nombre, candidato.nombre);
+    if (similitud >= 0.85 && (!mejor || similitud > mejor.similitud)) {
+      mejor = { id: candidato.id, similitud };
+    }
+  }
+  if (mejor) return mejor.id;
+
   const result = db
-    .prepare("INSERT INTO subtemas (sesion_id, nombre, fragmento) VALUES (?, ?, ?)")
-    .run(sesionId, nombre, fragmento);
+    .prepare("INSERT INTO conceptos (nombre, nombre_normalizado) VALUES (?, ?)")
+    .run(nombre.trim(), clave);
   return Number(result.lastInsertRowid);
 }
+
+function filaAConcepto(fila: {
+  id: number;
+  nombre: string;
+  veces_visto: number;
+  veces_acierto: number;
+  veces_fallo: number;
+  ultimo_resultado: number | null;
+  caja: number;
+  proximo_repaso: string | null;
+  primera_vez: string;
+  ultima_vez: string;
+}): ConceptoEstado {
+  return {
+    id: fila.id,
+    nombre: fila.nombre,
+    vecesVisto: fila.veces_visto,
+    vecesAcierto: fila.veces_acierto,
+    vecesFallo: fila.veces_fallo,
+    ultimoResultado: fila.ultimo_resultado === null ? null : fila.ultimo_resultado === 1,
+    caja: fila.caja,
+    proximoRepaso: fila.proximo_repaso,
+    primeraVez: fila.primera_vez,
+    ultimaVez: fila.ultima_vez,
+  };
+}
+
+/**
+ * Actualiza la memoria del concepto al responder: contadores reales y caja Leitner.
+ * Un fallo lo devuelve a la caja 1 (se repasa mañana); un acierto lo sube de caja.
+ */
+function registrarResultadoConcepto(conceptoId: number, acertado: boolean): void {
+  const fila = db.prepare("SELECT caja FROM conceptos WHERE id = ?").get(conceptoId) as
+    | { caja: number }
+    | undefined;
+  if (!fila) return;
+  const caja = acertado ? Math.min(fila.caja + 1, DIAS_POR_CAJA.length) : 1;
+  const dias = DIAS_POR_CAJA[caja - 1] ?? 1;
+  db.prepare(
+    `UPDATE conceptos SET
+       veces_acierto = veces_acierto + ?,
+       veces_fallo = veces_fallo + ?,
+       ultimo_resultado = ?,
+       caja = ?,
+       proximo_repaso = datetime('now', ?),
+       ultima_vez = CURRENT_TIMESTAMP
+     WHERE id = ?`
+  ).run(acertado ? 1 : 0, acertado ? 0 : 1, acertado ? 1 : 0, caja, `+${dias} days`, conceptoId);
+}
+
+/**
+ * Alta de un sub-tema: resuelve/crea su concepto y lo enlaza. Es el ÚNICO punto de
+ * escritura de `subtemas`, así que toda sesión queda en la memoria sin tocar el sondeo.
+ */
+const agregarSubtema = db.transaction(
+  (sesionId: number, nombre: string, fragmento: string | null = null): number => {
+    const conceptoId = resolverConcepto(nombre);
+    db.prepare(
+      "UPDATE conceptos SET veces_visto = veces_visto + 1, ultima_vez = CURRENT_TIMESTAMP WHERE id = ?"
+    ).run(conceptoId);
+    const result = db
+      .prepare("INSERT INTO subtemas (sesion_id, nombre, fragmento, concepto_id) VALUES (?, ?, ?, ?)")
+      .run(sesionId, nombre, fragmento, conceptoId);
+    return Number(result.lastInsertRowid);
+  }
+);
+
+type FilaConcepto = Parameters<typeof filaAConcepto>[0];
+
+/** Conceptos con repaso vencido, del más atrasado al menos. */
+function obtenerConceptosVencidos(limite: number = 50): ConceptoEstado[] {
+  const filas = db
+    .prepare(
+      `SELECT * FROM conceptos
+        WHERE proximo_repaso IS NOT NULL AND proximo_repaso <= datetime('now')
+        ORDER BY proximo_repaso ASC, id ASC
+        LIMIT ?`
+    )
+    .all(limite) as FilaConcepto[];
+  return filas.map(filaAConcepto);
+}
+
+/** Todos los conceptos, del más reciente al más viejo (para la vista de progreso). */
+function listarConceptos(limite: number = 200): ConceptoEstado[] {
+  const filas = db
+    .prepare("SELECT * FROM conceptos ORDER BY ultima_vez DESC, id DESC LIMIT ?")
+    .all(limite) as FilaConcepto[];
+  return filas.map(filaAConcepto);
+}
+
+function obtenerConcepto(conceptoId: number): ConceptoEstado | null {
+  const fila = db.prepare("SELECT * FROM conceptos WHERE id = ?").get(conceptoId) as
+    | FilaConcepto
+    | undefined;
+  return fila ? filaAConcepto(fila) : null;
+}
+
+function contarConceptos(): { total: number; vencidos: number } {
+  const total = (db.prepare("SELECT COUNT(*) AS n FROM conceptos").get() as { n: number }).n;
+  const vencidos = (
+    db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM conceptos WHERE proximo_repaso IS NOT NULL AND proximo_repaso <= datetime('now')"
+      )
+      .get() as { n: number }
+  ).n;
+  return { total, vencidos };
+}
+
+/**
+ * Crea una sesión de repaso sobre conceptos ya conocidos (memoria entre sesiones).
+ * El texto fuente es el de la sesión más reciente donde aparecieron y cada sub-tema
+ * conserva su fragmento original: el repaso funciona aunque el nombre del concepto no
+ * aparezca literal en el texto elegido.
+ */
+const crearSesionRepaso = db.transaction((conceptoIds: number[]): number | null => {
+  const ids = Array.from(new Set(conceptoIds.filter((id) => Number.isInteger(id) && id > 0)));
+  if (ids.length === 0) return null;
+  const placeholders = ids.map(() => "?").join(", ");
+
+  const origen = db
+    .prepare(
+      `SELECT se.texto_original AS texto
+         FROM subtemas su JOIN sesiones se ON se.id = su.sesion_id
+        WHERE su.concepto_id IN (${placeholders})
+        ORDER BY se.creada_en DESC, se.id DESC LIMIT 1`
+    )
+    .get(...ids) as { texto: string } | undefined;
+  if (!origen) return null;
+
+  const filas = db
+    .prepare(
+      `SELECT su.nombre AS nombre, su.fragmento AS fragmento
+         FROM subtemas su JOIN sesiones se ON se.id = su.sesion_id
+        WHERE su.concepto_id IN (${placeholders})
+        ORDER BY se.creada_en DESC, su.id DESC`
+    )
+    .all(...ids) as { nombre: string; fragmento: string | null }[];
+
+  const vistos = new Set<string>();
+  const aRepasar: { nombre: string; fragmento: string | null }[] = [];
+  for (const fila of filas) {
+    const clave = claveConcepto(fila.nombre);
+    if (vistos.has(clave)) continue;
+    vistos.add(clave);
+    aRepasar.push(fila);
+  }
+  if (aRepasar.length === 0) return null;
+
+  const titulo = aRepasar.map((c) => c.nombre).slice(0, 3).join(", ");
+  const topic = `Repaso: ${titulo}${aRepasar.length > 3 ? "…" : ""}`;
+  const sesionId = crearSesion(topic, origen.texto, null, { modo: "repaso" });
+  for (const concepto of aRepasar) {
+    agregarSubtema(sesionId, concepto.nombre, concepto.fragmento);
+  }
+  return sesionId;
+});
 
 /** Resultado del descarte de sub-temas (Fase C1). `motivo` explica por qué no se pudo. */
 interface ResultadoDescarte {
@@ -880,8 +1097,10 @@ const registrarRespuesta = db.transaction(
 
     let dominado = false;
     const subtema = db
-      .prepare("SELECT aciertos_seguidos FROM subtemas WHERE id = ?")
-      .get(pregunta.subtema_id) as { aciertos_seguidos: number } | undefined;
+      .prepare("SELECT aciertos_seguidos, concepto_id FROM subtemas WHERE id = ?")
+      .get(pregunta.subtema_id) as
+      | { aciertos_seguidos: number; concepto_id: number | null }
+      | undefined;
 
     if (subtema) {
       // Al fallar, los aciertos seguidos vuelven a 0 y el sub-tema deja de estar dominado.
@@ -903,6 +1122,12 @@ const registrarRespuesta = db.transaction(
         db.prepare("UPDATE preguntas SET descartada = 1 WHERE subtema_id = ? AND respondida = 0").run(
           pregunta.subtema_id
         );
+      }
+
+      // Memoria entre sesiones: el resultado mueve también el concepto global (contadores
+      // y próximo repaso). Es lo que hace que la app recuerde entre sesiones.
+      if (subtema.concepto_id) {
+        registrarResultadoConcepto(subtema.concepto_id, correcta);
       }
     }
 
@@ -1196,6 +1421,16 @@ const registrarIntentoEjercicio = db.transaction(
         "INSERT INTO intentos_ejercicio (ejercicio_id, codigo, aprobado, salida) VALUES (?, ?, ?, ?)"
       )
       .run(ejercicioId, codigo, aprobado ? 1 : 0, salida);
+
+    // El intento también alimenta la memoria del concepto: practicar en Enseñar cuenta
+    // igual que responder en el sondeo para los contadores y el próximo repaso.
+    const fila = db
+      .prepare(
+        "SELECT s.concepto_id AS conceptoId FROM ejercicios e JOIN subtemas s ON s.id = e.subtema_id WHERE e.id = ?"
+      )
+      .get(ejercicioId) as { conceptoId: number | null } | undefined;
+    if (fila?.conceptoId) registrarResultadoConcepto(fila.conceptoId, aprobado);
+
     return Number(result.lastInsertRowid);
   }
 );
@@ -1297,6 +1532,11 @@ export {
   crearSesion,
   agregarSubtema,
   descartarSubtemas,
+  obtenerConceptosVencidos,
+  listarConceptos,
+  obtenerConcepto,
+  contarConceptos,
+  crearSesionRepaso,
   obtenerSubtemas,
   /** Saltar/des-saltar un sub-tema sin tocar el dominio. */
   marcarSubtemaSaltado,

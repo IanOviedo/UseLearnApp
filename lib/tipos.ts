@@ -119,6 +119,26 @@ export interface SubtemaEstado {
   saltado: boolean;
 }
 
+/**
+ * Fase memoria — un concepto que sobrevive entre sesiones. Es la fila de `conceptos`:
+ * "Closures" en dos sesiones distintas apunta a un solo `ConceptoEstado`.
+ */
+export interface ConceptoEstado {
+  id: number;
+  nombre: string;
+  vecesVisto: number;
+  vecesAcierto: number;
+  vecesFallo: number;
+  ultimoResultado: boolean | null;
+  /** Caja Leitner (1..3): sube con los aciertos y vuelve a 1 con un fallo. */
+  caja: number;
+  /** Fecha/hora ISO (SQLite) del próximo repaso; null = nunca programado. */
+  proximoRepaso: string | null;
+  primeraVez: string;
+  ultimaVez: string;
+}
+
+
 export interface ProgresoSondeo {
   respondidas: number;
   totalServibles: number;

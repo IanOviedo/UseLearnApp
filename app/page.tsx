@@ -27,6 +27,7 @@ import {
   IconoObjetivo,
   IconoPlay,
 } from "@/components/ui/Iconos";
+import TarjetaRepaso from "@/components/repaso/TarjetaRepaso";
 
 
 type EstadoQuiz = "idle" | "generando" | "listo";
@@ -629,6 +630,21 @@ export default function HomePage() {
             <IconoHistorial className="h-4 w-4" />
           </span>
           <span className="flex-1 text-sm font-medium text-neutral-200">Sesiones pasadas</span>
+          <IconoChevron className="h-4 w-4 text-neutral-600 transition-colors group-hover:text-neutral-300" />
+        </button>
+
+        {/* Memoria entre sesiones: repaso espaciado (sección 11 del ESTADO). */}
+        <TarjetaRepaso />
+
+        {/* Progreso por concepto: vista longitudinal que antes no existía. */}
+        <button
+          onClick={() => router.push("/progreso")}
+          className="group mt-3 flex w-full items-center gap-3 rounded-2xl border border-neutral-800/60 bg-neutral-900/50 p-5 text-left transition-colors duration-200 hover:border-neutral-700 hover:bg-neutral-900/80"
+        >
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-neutral-800 bg-neutral-950/60 text-neutral-400 transition-colors group-hover:text-neutral-200">
+            <IconoObjetivo className="h-4 w-4" />
+          </span>
+          <span className="flex-1 text-sm font-medium text-neutral-200">Tu progreso</span>
           <IconoChevron className="h-4 w-4 text-neutral-600 transition-colors group-hover:text-neutral-300" />
         </button>
       </main>

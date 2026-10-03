@@ -167,6 +167,20 @@ export function maxPreguntasSesion(subtemas: number): number {
 /** Aciertos seguidos necesarios para considerar un sub-tema dominado. */
 export const ACIERTOS_SEGUIDOS_PARA_DOMINAR = 2;
 
+// --- Memoria entre sesiones (repaso espaciado) --------------------------------
+// Hasta antes de esto la app olvidaba: cada sub-tema vivía en UNA sesión y no había
+// noción de "concepto" que sobreviviera. La tabla `conceptos` es esa memoria.
+
+/**
+ * Días hasta el próximo repaso según la caja Leitner (índice 0 = caja 1).
+ * Un fallo devuelve el concepto a la caja 1; un acierto la sube hasta la última.
+ */
+export const DIAS_POR_CAJA = [1, 3, 7] as const;
+
+/** Cuántos conceptos vencidos se ofrecen de una sola vez para repasar. */
+export const LIMITE_CONCEPTOS_REPASO = 8;
+
+
 /** Preguntas que se piden de una sola vez por sub-tema (default del preset). */
 export const PREGUNTAS_POR_LOTE = BASE.preguntasPorLote;
 
