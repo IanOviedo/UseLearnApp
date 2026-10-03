@@ -113,8 +113,14 @@ function columnasDe(tabla: string): string[] {
 }
 
 function asegurarColumna(tabla: string, columna: string, definicion: string): void {
-  if (!columnasDe(tabla).includes(columna)) {
+  if (columnasDe(tabla).includes(columna)) return;
+  try {
     db.exec(`ALTER TABLE ${tabla} ADD COLUMN ${columna} ${definicion}`);
+  } catch (error) {
+    // `next build` recolecta la config de varias rutas en workers en paralelo, y cada uno
+    // importa este módulo: dos procesos pueden ver la columna faltante a la vez y uno pierde
+    // con "duplicate column name". La columna ya está, que es justo lo que se quería.
+    if (!(error instanceof Error) || !/duplicate column name/i.test(error.message)) throw error;
   }
 }
 
@@ -750,6 +756,17 @@ function contarConceptos(): { total: number; vencidos: number } {
       .get() as { n: number }
   ).n;
   return { total, vencidos };
+}
+
+/** Conceptos que aparecen en una sesión (cierre y export a Obsidian). */
+function obtenerConceptosDeSesion(sesionId: number): ConceptoEstado[] {
+  const filas = db
+    .prepare(
+      `SELECT DISTINCT c.* FROM conceptos c JOIN subtemas s ON s.concepto_id = c.id
+        WHERE s.sesion_id = ? ORDER BY c.nombre`
+    )
+    .all(sesionId) as FilaConcepto[];
+  return filas.map(filaAConcepto);
 }
 
 /**
@@ -1536,6 +1553,7 @@ export {
   listarConceptos,
   obtenerConcepto,
   contarConceptos,
+  obtenerConceptosDeSesion,
   crearSesionRepaso,
   obtenerSubtemas,
   /** Saltar/des-saltar un sub-tema sin tocar el dominio. */

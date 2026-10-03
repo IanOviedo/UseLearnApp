@@ -146,7 +146,12 @@ export default function SondeoPage() {
 
   if (fase === "cerrar") {
     return (
-      <FaseCierre tema={estado.tema} feedback={feedback} onVolver={() => router.push("/")} />
+      <FaseCierre
+        sesionId={sesionId}
+        tema={estado.tema}
+        feedback={feedback}
+        onVolver={() => router.push("/")}
+      />
     );
   }
 
