@@ -128,7 +128,7 @@ Esta pasada cierra §12.2 (el resto de (g)), §11.2-11.4 (memoria + repaso + pro
 - **Set golden con reportes reales**: pendiente a pedido del usuario.
   *(Lo de partir `app/page.tsx` se hizo igual, ver §16.7.)*
 
-### 16.7 Deuda §6.13: `app/page.tsx` partido (935 → 691 líneas)
+### 16.7 Deuda §6.13: `app/page.tsx` partido (935 → 615 líneas)
 
 - `components/ajustes/ModalAjustes.tsx` (310 líneas) se llevó el modal completo: lista de modelos
   de Ollama (el fetch a `/api/modelos/listar` ahora corre al montar el modal), modelo de preguntas
@@ -143,10 +143,20 @@ Esta pasada cierra §12.2 (el resto de (g)), §11.2-11.4 (memoria + repaso + pro
   Esa auditoría encontró un bug real que `tsc` y `eslint` **no** pueden ver: el primer pego
   dejó `onClick={() => onCerrar}`, que devuelve la función sin invocarla (el modal no se cerraba
   ni apretando Escape/click fuera). Corregido a `onClick={onCerrar}`.
-- Verificación final: `npm run verify` (111/111), `npm run build` y smoke de la landing.
-- **Lo que queda de la deuda:** el archivo sigue en **691 líneas** (el modal de sesiones y el
-  cuerpo de la landing son los próximos cortes). El tamaño importa por §12.8: el harness se
-  rompe con ediciones parciales de archivos grandes.
+- **Segundo corte (misma tanda):** `components/sesiones/ModalSesiones.tsx` (102 líneas) se llevó
+  el modal de "Sesiones pasadas": el JSX completo, `formatearFecha`, el tipo `SesionConEstado`
+  (que la página importa para su estado) y los iconos `IconoCerrar`/`IconoCheck`, que quedaron
+  sin uso en la página. **Frontera:** props `sesiones`/`onCerrar`/`onAbrir`/`onEliminar`; el
+  fetch de listar/eliminar y la navegación a `/sondeo/:id` se quedaron en `page.tsx` (son del
+  flujo, no del modal). La misma auditoría (bloque de `git show HEAD:app/page.tsx` vs.
+  componente) dio **idéntica salvo dedent −4 y 4 renombres declarados** (`onCerrar` ×2,
+  `onAbrir`, `onEliminar`), y la interface + `formatearFecha` byte a byte iguales a HEAD.
+- Verificación final: `npm run verify` (111/111), `npm run build` y smoke con `next start`:
+  landing 200 con el HTML idéntico (15986 bytes), `/api/progreso` 200 (`total: 75`,
+  `vencidos: 75`) y `/api/sesiones/listar` 200 (15 sesiones).
+- **Lo que queda de la deuda:** el archivo quedó en **615 líneas**; el próximo corte es el
+  cuerpo de la landing (tarjeta de ingesta y de quiz). El tamaño importa por §12.8: el harness
+  se rompe con ediciones parciales de archivos grandes.
 
 ## 1. Estado por módulo
 
@@ -363,11 +373,12 @@ al filtro de calidad:
 12. Import desde la carpeta de notas con `fs` (solo lectura, whitelist).
 
 **Deuda técnica**
-13. ~~Extraer `ModalAjustes` de `app/page.tsx`~~ **✅ hecho en la Tanda 4 (§16.7):** el modal
-    vive ahora en `components/ajustes/ModalAjustes.tsx` y `page.tsx` bajó de **935 a 691**
-    líneas. El tamaño importa por una razón práctica (§12.8): el harness se rompe con ediciones
-    parciales de archivos grandes. **Sigue abierta la parte restante:** partir el resto del
-    archivo (691 líneas) y extraer también el modal de sesiones.
+13. ~~Extraer `ModalAjustes` y el modal de sesiones de `app/page.tsx`~~ **✅ hecho en la Tanda 4
+    (§16.7):** los dos modales viven ahora en `components/ajustes/ModalAjustes.tsx` y
+    `components/sesiones/ModalSesiones.tsx`, y `page.tsx` bajó de **935 a 615** líneas. El tamaño
+    importa por una razón práctica (§12.8): el harness se rompe con ediciones parciales de
+    archivos grandes. **Sigue abierta la parte restante:** partir el cuerpo de la landing
+    (tarjeta de ingesta y de quiz).
 14. Tests automatizados — **51 tests con `vitest`** (`lib/texto.ts`, `lib/db.ts` y el fail-open del
     juez). Scripts: `npm test`, `npm run typecheck`, `npm run check:callers` y **`npm run verify`**
     (los cuatro encadenados). **Lo que falta:** los payloads de `servirSiguiente`, el set golden
@@ -1007,8 +1018,8 @@ El historial de confusiones por concepto no necesita tabla nueva: se consulta de
   con el modelo que realmente se usará como juez, y el juez **no debe ser el mismo modelo que generó** la
   pregunta.
 - **Partir `app/page.tsx`** (§6 ítem 13): además de deuda técnica, el tamaño del archivo está
-  ligado a que el harness rompa las ediciones parciales. *(`ModalAjustes` ya se extrajo en
-  §16.7; el archivo quedó en 691 líneas y sigue siendo largo.)*
+  ligado a que el harness rompa las ediciones parciales. *(`ModalAjustes` y `ModalSesiones` ya
+  se extrajeron en §16.7; el archivo quedó en 615 líneas y sigue siendo largo.)*
 
 ### 12.9 Orden vigente y cómo se verifica cada paso
 
@@ -1134,8 +1145,8 @@ par de commits que nadie lo corrió. Es el mismo modo de falla de §10.1.
   de payloads siguen dependiendo de verificación manual.
 - **No hay `npm run verify`**: typecheck, lint y tests se corren por separado, así que es posible
   commitear con uno en rojo (como pasó con el lint). *(Resuelto en la segunda tanda, §13.5.)*
-- **`page.tsx` sigue largo**: bajó a **691 líneas** con `ModalAjustes` extraído (§16.7), pero el
-  resto del archivo sigue de un tirón.
+- **`page.tsx` sigue largo**: bajó a **615 líneas** con `ModalAjustes` y `ModalSesiones`
+  extraídos (§16.7), pero el resto del archivo sigue de un tirón.
 - **El reparto está verificado con un corpus y un modelo.** El test fija la lógica, no que el modelo
   detecte bien los conceptos: eso sigue siendo cuestión de prompt, no de código.
 
@@ -1215,7 +1226,8 @@ espiar exports de ESM no es confiable; interceptar la red cubre la cadena real.
   (§12.8) y correrlo con el modelo que se vaya a usar.
 - ~~**`lib/validacion.ts` y `lib/sondeo.ts` sin tests.**~~ `lib/validacion.ts` cerró con **12 tests**
   en la Tanda 4; sigue faltando `lib/sondeo.ts`.
-- **`page.tsx` sigue en 691 líneas** (con `ModalAjustes` extraído en §16.7; falta partir el resto).
+- **`page.tsx` sigue en 615 líneas** (con `ModalAjustes` y `ModalSesiones` extraídos en §16.7;
+  falta partir el cuerpo de la landing).
 - ⏸ **Set golden con reportes reales**: pendiente a pedido explícito del usuario. Ver §15.
 
 ### 13.9 El botón "esta pregunta está mal" (ítem 15, cerrado)
@@ -1277,7 +1289,7 @@ historial no cambió y que el sub-tema sigue con 0 intentos.
 | 0b. Asserts del fail-open | ✅ cerrado (§13.6) |
 | 15. Botón "pregunta mala" | ✅ cerrado (§13.9) |
 | 14. Tests | 🟢 **111 tests**; `validacion.ts` cerrado (Tanda 4). Faltan los payloads de `servirSiguiente` |
-| 13. Partir `page.tsx` | 🟡 **parcial (§16.7)**: `ModalAjustes` extraído, 935 → 691 líneas. Falta partir el resto |
+| 13. Partir `page.tsx` | 🟡 **parcial (§16.7)**: `ModalAjustes` + `ModalSesiones` extraídos, 935 → 615 líneas. Falta partir el cuerpo de la landing |
 | 4. Regla de dominio | ❌ sigue abierto (Paso 3) |
 
 ## 14. Calibración del juez: primera medición real (30/09/2026)
